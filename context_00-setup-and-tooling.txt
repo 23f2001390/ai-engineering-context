@@ -1,0 +1,4923 @@
+
+================================================================================
+FILE: 00-setup-and-tooling\README.md
+================================================================================
+
+# Phase 0: Setup & Tooling
+
+> Get your environment ready for everything that follows.
+
+See [ROADMAP.md](../../ROADMAP.md) for the full lesson plan.
+
+
+================================================================================
+FILE: 00-setup-and-tooling\01-dev-environment\quiz.json
+================================================================================
+
+{
+  "questions": [
+    {
+      "stage": "pre",
+      "question": "Why do AI projects need a separate virtual environment?",
+      "options": [
+        "Virtual environments make code run faster",
+        "They isolate dependencies so different projects don't conflict",
+        "Python requires virtual environments to import packages",
+        "Virtual environments provide GPU access"
+      ],
+      "correct": 1,
+      "explanation": "Virtual environments isolate package versions per project. Without them, upgrading PyTorch for one project can break another that depends on an older version."
+    },
+    {
+      "stage": "pre",
+      "question": "What does CUDA provide for AI workloads?",
+      "options": [
+        "A Python package manager for ML libraries",
+        "A web framework for deploying models",
+        "Parallel computing on NVIDIA GPUs for matrix operations",
+        "A container runtime for model serving"
+      ],
+      "correct": 2,
+      "explanation": "CUDA is NVIDIA's parallel computing platform that lets you run matrix operations on thousands of GPU cores simultaneously. PyTorch and TensorFlow use it under the hood."
+    },
+    {
+      "stage": "post",
+      "question": "In the four-layer environment stack, which layer must be installed first?",
+      "options": [
+        "AI/ML Libraries (PyTorch, JAX)",
+        "Package Managers (pip, npm, cargo)",
+        "Language Runtimes (Python, Node.js)",
+        "System Foundation (OS, shell, GPU drivers)"
+      ],
+      "correct": 3,
+      "explanation": "You install bottom-up: system foundation first (OS, drivers), then package managers, then language runtimes, then AI libraries. Each layer depends on the one below."
+    },
+    {
+      "stage": "post",
+      "question": "What is the purpose of uv in a Python AI project?",
+      "options": [
+        "A GPU monitoring tool",
+        "An ultra-fast Python package installer and resolver",
+        "A neural network visualization library",
+        "A CUDA compiler for custom kernels"
+      ],
+      "correct": 1,
+      "explanation": "uv is a fast Python package installer written in Rust. It replaces pip with much faster dependency resolution and installation, often 10-100x faster."
+    },
+    {
+      "stage": "post",
+      "question": "How do you verify that PyTorch can access your GPU?",
+      "options": [
+        "import torch; print(torch.__version__)",
+        "nvidia-smi --query",
+        "import torch; print(torch.cuda.is_available())",
+        "python -c 'import gpu'"
+      ],
+      "correct": 2,
+      "explanation": "torch.cuda.is_available() returns True if PyTorch can access CUDA GPUs. On Apple Silicon, use torch.backends.mps.is_available() for Metal Performance Shaders."
+    }
+  ]
+}
+
+
+================================================================================
+FILE: 00-setup-and-tooling\01-dev-environment\code\hello.py
+================================================================================
+
+print("Hello, World from Python!")
+
+
+================================================================================
+FILE: 00-setup-and-tooling\01-dev-environment\code\verify.py
+================================================================================
+
+import sys
+import shutil
+import subprocess
+
+CHECKS = [
+    ("Python 3.10+", lambda: sys.version_info >= (3, 10), f"Python {sys.version}"),
+    ("NumPy", lambda: __import__("numpy"), None),
+    ("Matplotlib", lambda: __import__("matplotlib"), None),
+    ("Jupyter", lambda: __import__("jupyter"), None),
+    ("Git", lambda: shutil.which("git") is not None, None),
+    ("Node.js", lambda: shutil.which("node") is not None, None),
+    ("Rust (cargo)", lambda: shutil.which("cargo") is not None, None),
+]
+
+GPU_CHECKS = [
+    ("PyTorch", lambda: __import__("torch"), None),
+    (
+        "CUDA",
+        lambda: __import__("torch").cuda.is_available(),
+        lambda: __import__("torch").cuda.get_device_name(0) if __import__("torch").cuda.is_available() else "Not available",
+    ),
+]
+
+
+def run_check(name, check_fn, detail_fn=None):
+    try:
+        result = check_fn()
+        if result is False:
+            raise Exception("Check returned False")
+        detail = ""
+        if detail_fn:
+            if callable(detail_fn):
+                detail = f" ({detail_fn()})"
+            else:
+                detail = f" ({detail_fn})"
+        print(f"  [PASS] {name}{detail}")
+        return True
+    except Exception:
+        print(f"  [FAIL] {name}")
+        return False
+
+
+def main():
+    print("\n=== AI Engineering from Scratch — Environment Check ===\n")
+
+    print("Core:")
+    passed = sum(run_check(name, fn, detail) for name, fn, detail in CHECKS)
+    total = len(CHECKS)
+
+    print("\nGPU (optional):")
+    gpu_passed = sum(run_check(name, fn, detail) for name, fn, detail in GPU_CHECKS)
+    gpu_total = len(GPU_CHECKS)
+
+    print(f"\nResult: {passed}/{total} core checks passed", end="")
+    if gpu_passed > 0:
+        print(f", {gpu_passed}/{gpu_total} GPU checks passed")
+    else:
+        print(" (no GPU — that's fine, most lessons work on CPU)")
+
+    if passed == total:
+        print("\nYou're ready. Start with Phase 1.\n")
+    else:
+        print("\nFix the failed checks above, then run this script again.\n")
+
+    return 0 if passed == total else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+
+
+================================================================================
+FILE: 00-setup-and-tooling\01-dev-environment\docs\en.md
+================================================================================
+
+# Dev Environment
+
+> Your tools shape your thinking. Set them up once, set them up right.
+
+**Type:** Build
+**Languages:** Python, Node.js, Rust
+**Prerequisites:** None
+**Time:** ~45 minutes
+
+## Learning Objectives
+
+- Set up Python 3.11+, Node.js 20+, and Rust toolchains from scratch
+- Configure virtual environments and package managers for reproducible builds
+- Verify GPU access with CUDA/MPS and run a test tensor operation
+- Understand the four-layer stack: system, packages, runtimes, AI libraries
+
+## The Problem
+
+You're about to learn AI engineering across 200+ lessons using Python, TypeScript, Rust, and Julia. If your environment is broken, every single lesson becomes a fight against tooling instead of learning.
+
+Most people skip environment setup. Then they spend hours debugging import errors, version conflicts, and missing CUDA drivers. We're going to do this once, properly.
+
+## The Concept
+
+An AI engineering environment has four layers:
+
+```mermaid
+graph TD
+    A["4. AI/ML Libraries\nPyTorch, JAX, transformers, etc."] --> B["3. Language Runtimes\nPython 3.11+, Node 20+, Rust, Julia"]
+    B --> C["2. Package Managers\nuv, pnpm, cargo, juliaup"]
+    C --> D["1. System Foundation\nOS, shell, git, editor, GPU drivers"]
+```
+
+We install bottom-up. Each layer depends on the one below it.
+
+## Build It
+
+### Step 1: System Foundation
+
+Check your system and install the basics.
+
+```bash
+# macOS
+xcode-select --install
+brew install git curl wget
+
+# Ubuntu/Debian
+sudo apt update && sudo apt install -y build-essential git curl wget
+
+# Windows (use WSL2)
+wsl --install -d Ubuntu-24.04
+```
+
+### Step 2: Python with uv
+
+We use `uv` — it's 10-100x faster than pip and handles virtual environments automatically.
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+uv python install 3.12
+
+uv venv
+source .venv/bin/activate  # or .venv\Scripts\activate on Windows
+
+uv pip install numpy matplotlib jupyter
+```
+
+Verify:
+
+```python
+import sys
+print(f"Python {sys.version}")
+
+import numpy as np
+print(f"NumPy {np.__version__}")
+a = np.array([1, 2, 3])
+print(f"Vector: {a}, dot product with itself: {np.dot(a, a)}")
+```
+
+### Step 3: Node.js with pnpm
+
+For TypeScript lessons (agents, MCP servers, web apps).
+
+```bash
+curl -fsSL https://fnm.vercel.app/install | bash
+fnm install 22
+fnm use 22
+
+npm install -g pnpm
+
+node -e "console.log('Node', process.version)"
+```
+
+### Step 4: Rust
+
+For performance-critical lessons (inference, systems).
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+rustc --version
+cargo --version
+```
+
+### Step 5: Julia (Optional)
+
+For math-heavy lessons where Julia shines.
+
+```bash
+curl -fsSL https://install.julialang.org | sh
+
+julia -e 'println("Julia ", VERSION)'
+```
+
+### Step 6: GPU Setup (If You Have One)
+
+```bash
+# NVIDIA
+nvidia-smi
+
+# Install PyTorch with CUDA
+uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+```
+
+```python
+import torch
+print(f"CUDA available: {torch.cuda.is_available()}")
+if torch.cuda.is_available():
+    print(f"GPU: {torch.cuda.get_device_name(0)}")
+```
+
+No GPU? No problem. Most lessons work on CPU. For training-heavy lessons, use Google Colab or cloud GPUs.
+
+### Step 7: Build the Verification Script (from scratch)
+
+Instead of relying on magic black-box checks, we will write our own environment verifier from scratch using Python's standard library. This script will check paths, probe system runtimes, import our ML dependencies, and inspect CUDA GPU availability.
+
+Create a new file `phases/00-setup-and-tooling/01-dev-environment/code/verify.py` and write the following code:
+
+```python
+import sys
+import shutil
+
+# 1. Define the check list
+# Each check has a name, a function to run, and an optional detail description
+CHECKS = [
+    ("Python 3.10+", lambda: sys.version_info >= (3, 10), f"Python {sys.version}"),
+    ("NumPy", lambda: __import__("numpy"), None),
+    ("Matplotlib", lambda: __import__("matplotlib"), None),
+    ("Jupyter", lambda: __import__("jupyter"), None),
+    ("Git", lambda: shutil.which("git") is not None, None),
+    ("Node.js", lambda: shutil.which("node") is not None, None),
+    ("Rust (cargo)", lambda: shutil.which("cargo") is not None, None),
+]
+
+# GPU tests are optional, but we want to know if they exist
+GPU_CHECKS = [
+    ("PyTorch", lambda: __import__("torch"), None),
+    (
+        "CUDA",
+        lambda: __import__("torch").cuda.is_available(),
+        lambda: __import__("torch").cuda.get_device_name(0) if __import__("torch").cuda.is_available() else "Not available",
+    ),
+]
+
+# 2. Write the runner logic
+def run_check(name, check_fn, detail_fn=None):
+    try:
+        result = check_fn()
+        if result is False:
+            raise Exception("Check failed")
+        
+        detail = ""
+        if detail_fn:
+            detail = f" ({detail_fn() if callable(detail_fn) else detail_fn})"
+        print(f"  [PASS] {name}{detail}")
+        return True
+    except Exception:
+        print(f"  [FAIL] {name}")
+        return False
+
+# 3. Main orchestration
+def main():
+    print("\n=== AI Engineering from Scratch — Environment Check ===\n")
+
+    print("Core:")
+    passed = sum(run_check(name, fn, detail) for name, fn, detail in CHECKS)
+    total = len(CHECKS)
+
+    print("\nGPU (optional):")
+    gpu_passed = sum(run_check(name, fn, detail) for name, fn, detail in GPU_CHECKS)
+    gpu_total = len(GPU_CHECKS)
+
+    print(f"\nResult: {passed}/{total} core checks passed", end="")
+    if gpu_passed > 0:
+        print(f", {gpu_passed}/{gpu_total} GPU checks passed")
+    else:
+        print(" (no GPU — that's fine, most lessons work on CPU)")
+
+    if passed == total:
+        print("\nYou're ready. Start with Phase 1.\n")
+    else:
+        print("\nFix the failed checks above, then run this script again.\n")
+
+    return 0 if passed == total else 1
+
+if __name__ == "__main__":
+    sys.exit(main())
+```
+
+Run your new verification script to ensure everything is configured correctly:
+
+```bash
+python phases/00-setup-and-tooling/01-dev-environment/code/verify.py
+```
+
+## Use It
+
+Your environment is now ready for every lesson in this course. Here's what you'll use where:
+
+| Language | Used In | Package Manager |
+|----------|---------|-----------------|
+| Python | Phases 1-12 (ML, DL, NLP, Vision, Audio, LLMs) | uv |
+| TypeScript | Phases 13-17 (Tools, Agents, Swarms, Infra) | pnpm |
+| Rust | Phases 12, 15-17 (Performance-critical systems) | cargo |
+| Julia | Phase 1 (Math foundations) | Pkg |
+
+## Ship It
+
+This lesson produces a verification script that anyone can run to check their setup.
+
+See `outputs/prompt-env-check.md` for a prompt that helps AI assistants diagnose environment issues.
+
+## Exercises
+
+1. Run the verification script and fix any failures
+2. Create a Python virtual environment for this course and install PyTorch
+3. Write a "hello world" in all four languages and run each one
+
+
+================================================================================
+FILE: 00-setup-and-tooling\01-dev-environment\outputs\prompt-env-check.md
+================================================================================
+
+---
+name: prompt-env-check
+description: Diagnose and fix AI engineering environment setup issues
+phase: 0
+lesson: 1
+---
+
+You are an AI engineering environment diagnostician. The user is setting up their development environment for an AI/ML course that uses Python, TypeScript, Rust, and Julia.
+
+When the user describes an issue:
+
+1. Identify which layer is broken (system, package manager, runtime, or library)
+2. Ask for the output of the relevant diagnostic command
+3. Provide the exact fix — not a general guide, the specific commands to run
+
+Common issues and fixes:
+
+- **Python version too old**: Install with `uv python install 3.12`
+- **CUDA not detected**: Check `nvidia-smi`, then reinstall PyTorch with the correct CUDA version
+- **Node.js missing**: Install with `fnm install 22`
+- **Import errors after install**: Check you're in the right virtual environment with `which python`
+- **Permission errors**: Never use `sudo pip install`, use `uv` with a virtual environment instead
+
+Always verify the fix worked by asking the user to run the verification script:
+```bash
+python phases/00-setup-and-tooling/01-dev-environment/code/verify.py
+```
+
+
+================================================================================
+FILE: 00-setup-and-tooling\02-git-and-collaboration\quiz.json
+================================================================================
+
+{
+  "questions": [
+    {
+      "stage": "pre",
+      "question": "What does 'version control' primarily help you do?",
+      "options": ["Speed up code execution", "Track changes to files over time and collaborate with others", "Compress files to save disk space", "Automatically fix bugs in your code"],
+      "correct": 1,
+      "explanation": "Version control systems like git track every change made to files, allowing you to revert to previous states and collaborate with others on the same codebase."
+    },
+    {
+      "stage": "pre",
+      "question": "What is a 'repository' in the context of software development?",
+      "options": ["A cloud storage service like Google Drive", "A collection of files and their complete change history managed by version control", "A database for storing user data", "A package manager for installing libraries"],
+      "correct": 1,
+      "explanation": "A repository (repo) is a directory tracked by git that contains all project files along with the full history of changes made to those files."
+    },
+    {
+      "stage": "post",
+      "question": "What is the correct sequence for saving and backing up your work in git?",
+      "options": ["git push, git add, git commit", "git commit, git add, git push", "git add, git commit, git push", "git clone, git add, git push"],
+      "correct": 2,
+      "explanation": "First you stage changes with 'git add', then save a snapshot with 'git commit', then upload to the remote with 'git push'. This is the daily workflow."
+    },
+    {
+      "stage": "post",
+      "question": "What does 'git checkout -b experiment/new-optimizer' do?",
+      "options": ["Downloads a branch from GitHub called experiment/new-optimizer", "Creates a new branch named experiment/new-optimizer and switches to it", "Deletes the branch experiment/new-optimizer", "Reverts all files to match the experiment/new-optimizer branch"],
+      "correct": 1,
+      "explanation": "The '-b' flag creates a new branch with the given name and immediately switches to it, allowing you to experiment without affecting the main branch."
+    },
+    {
+      "stage": "post",
+      "question": "Why should you add '.pt', '.pth', and '.safetensors' to your .gitignore?",
+      "options": ["They are Python test files that should not be committed", "They are model checkpoint files that are too large for git and can be re-generated", "They contain sensitive API keys", "Git cannot track binary files of any kind"],
+      "correct": 1,
+      "explanation": "Model checkpoint files (.pt, .pth, .safetensors) are often gigabytes in size. Git is not designed for large binary files, so these should be excluded and re-generated or stored separately."
+    }
+  ]
+}
+
+
+================================================================================
+FILE: 00-setup-and-tooling\02-git-and-collaboration\docs\en.md
+================================================================================
+
+# Git & Collaboration
+
+> Version control is not optional. Every experiment, every model, every lesson you build here gets tracked.
+
+**Type:** Learn
+**Languages:** --
+**Prerequisites:** Phase 0, Lesson 01
+**Time:** ~30 minutes
+
+## Learning Objectives
+
+- Configure git identity and use the daily workflow of add, commit, and push
+- Create and merge branches for isolated experiments without breaking main
+- Write a `.gitignore` that excludes model checkpoints and large binary files
+- Navigate the commit history with `git log` to understand project evolution
+
+## The Problem
+
+You're about to write hundreds of code files across 20 phases. Without version control you will lose work, break things you can't undo, and have no way to collaborate with others.
+
+Git is the tool. GitHub is where the code lives. This lesson covers what you need for this course and nothing more.
+
+## The Concept
+
+```mermaid
+sequenceDiagram
+    participant WD as Working Directory
+    participant SA as Staging Area
+    participant LR as Local Repo
+    participant R as Remote (GitHub)
+    WD->>SA: git add
+    SA->>LR: git commit
+    LR->>R: git push
+    R->>LR: git fetch
+    LR->>WD: git pull
+```
+
+Three things to remember:
+1. Save often (`git commit`)
+2. Push to remote (`git push`)
+3. Branch for experiments (`git checkout -b experiment`)
+
+## Build It
+
+### Step 1: Configure git
+
+```bash
+git config --global user.name "Your Name"
+git config --global user.email "you@example.com"
+```
+
+### Step 2: The daily workflow
+
+```bash
+git status
+git add file.py
+git commit -m "Add perceptron implementation"
+git push origin main
+```
+
+### Step 3: Branching for experiments
+
+```bash
+git checkout -b experiment/new-optimizer
+
+# ... make changes, commit ...
+
+git checkout main
+git merge experiment/new-optimizer
+```
+
+### Step 4: Working with this course repo
+
+```bash
+git clone https://github.com/rohitg00/ai-engineering-from-scratch.git
+cd ai-engineering-from-scratch
+
+git checkout -b my-progress
+# work through lessons, commit your code
+git push origin my-progress
+```
+
+## Use It
+
+For this course, you need exactly these commands:
+
+| Command | When |
+|---------|------|
+| `git clone` | Get the course repo |
+| `git add` + `git commit` | Save your work |
+| `git push` | Back it up to GitHub |
+| `git checkout -b` | Try something without breaking main |
+| `git log --oneline` | See what you've done |
+
+That's it. You don't need rebase, cherry-pick, or submodules for this course.
+
+## Exercises
+
+1. Clone this repo, create a branch called `my-progress`, make a file, commit it, push it
+2. Create a `.gitignore` that excludes model checkpoint files (`.pt`, `.pth`, `.safetensors`)
+3. Look at the commit history of this repo with `git log --oneline` and read how lessons were added
+
+## Key Terms
+
+| Term | What people say | What it actually means |
+|------|----------------|----------------------|
+| Commit | "Saving" | A snapshot of your entire project at a point in time |
+| Branch | "A copy" | A pointer to a commit that moves forward as you work |
+| Merge | "Combining code" | Taking changes from one branch and applying them to another |
+| Remote | "The cloud" | A copy of your repo hosted somewhere else (GitHub, GitLab) |
+
+
+================================================================================
+FILE: 00-setup-and-tooling\03-gpu-setup-and-cloud\quiz.json
+================================================================================
+
+{
+  "questions": [
+    {
+      "stage": "pre",
+      "question": "Why is a GPU faster than a CPU for training neural networks?",
+      "options": ["GPUs have higher clock speeds than CPUs", "GPUs can perform thousands of parallel matrix operations simultaneously", "GPUs have more RAM than CPUs", "GPUs use a more efficient programming language"],
+      "correct": 1,
+      "explanation": "GPUs have thousands of cores optimized for parallel computation, making them ideal for the matrix multiplications that dominate neural network training."
+    },
+    {
+      "stage": "pre",
+      "question": "What does VRAM refer to?",
+      "options": ["Virtual RAM used by the operating system for swap space", "Video RAM on the GPU, separate from system RAM", "The total RAM available across all devices", "A type of CPU cache memory"],
+      "correct": 1,
+      "explanation": "VRAM (Video RAM) is the dedicated memory on a GPU. It limits the size of models and batch sizes you can use during training, separate from your system's main RAM."
+    },
+    {
+      "stage": "post",
+      "question": "What command verifies that your NVIDIA GPU is detected and shows its current status?",
+      "options": ["gpu --status", "nvidia-smi", "torch.cuda.list_devices()", "lspci | grep gpu"],
+      "correct": 1,
+      "explanation": "nvidia-smi (NVIDIA System Management Interface) displays GPU utilization, memory usage, temperature, and running processes. It is the standard tool for verifying GPU availability."
+    },
+    {
+      "stage": "post",
+      "question": "When benchmarking GPU vs CPU matrix multiplication, why must you call torch.cuda.synchronize() before measuring GPU time?",
+      "options": ["To transfer data from CPU to GPU memory", "To ensure all GPU operations have completed before stopping the timer", "To reset the GPU clock speed to its base frequency", "To free unused GPU memory"],
+      "correct": 1,
+      "explanation": "GPU operations are asynchronous -- Python returns immediately while the GPU is still computing. synchronize() blocks until all GPU operations finish, giving accurate timing."
+    },
+    {
+      "stage": "post",
+      "question": "Using the fp16 rule of thumb, approximately how many parameters can fit in 24 GB of VRAM?",
+      "options": ["24 billion parameters", "12 billion parameters", "6 billion parameters", "48 billion parameters"],
+      "correct": 1,
+      "explanation": "In fp16, each parameter uses 2 bytes. 24 GB / 2 bytes = 12 billion parameters. This is a rough estimate; actual usage includes activations, gradients, and optimizer states."
+    }
+  ]
+}
+
+
+================================================================================
+FILE: 00-setup-and-tooling\03-gpu-setup-and-cloud\code\gpu_check.py
+================================================================================
+
+import time
+import sys
+
+
+def check_gpu():
+    try:
+        import torch
+    except ImportError:
+        print("PyTorch not installed. Run: pip install torch")
+        return
+
+    print("=== GPU Check ===\n")
+    print(f"PyTorch version: {torch.__version__}")
+    print(f"CUDA available: {torch.cuda.is_available()}")
+
+    if not torch.cuda.is_available():
+        print("\nNo GPU detected. That's fine for most lessons.")
+        print("For GPU-heavy lessons, use Google Colab (free).")
+        return
+
+    print(f"CUDA version: {torch.version.cuda}")
+    print(f"GPU: {torch.cuda.get_device_name(0)}")
+
+    props = torch.cuda.get_device_properties(0)
+    print(f"Memory: {props.total_memory / 1e9:.1f} GB")
+    print(f"Compute capability: {props.major}.{props.minor}")
+
+    print("\n=== CPU vs GPU Benchmark ===\n")
+    size = 4000
+
+    a = torch.randn(size, size)
+    b = torch.randn(size, size)
+
+    start = time.time()
+    _ = a @ b
+    cpu_time = time.time() - start
+    print(f"CPU matrix multiply ({size}x{size}): {cpu_time:.3f}s")
+
+    a_gpu = a.to("cuda")
+    b_gpu = b.to("cuda")
+    torch.cuda.synchronize()
+
+    start = time.time()
+    _ = a_gpu @ b_gpu
+    torch.cuda.synchronize()
+    gpu_time = time.time() - start
+    print(f"GPU matrix multiply ({size}x{size}): {gpu_time:.3f}s")
+    print(f"Speedup: {cpu_time / gpu_time:.0f}x")
+
+    vram_gb = props.total_memory / 1e9
+    params_fp16 = vram_gb * 1e9 / 2
+    params_billions = params_fp16 / 1e9
+    print(f"\nEstimated max model size (fp16): ~{params_billions:.0f}B parameters")
+
+
+if __name__ == "__main__":
+    check_gpu()
+
+
+================================================================================
+FILE: 00-setup-and-tooling\03-gpu-setup-and-cloud\docs\en.md
+================================================================================
+
+# GPU Setup & Cloud
+
+> Training on CPU is fine for learning. Training for real needs a GPU.
+
+**Type:** Build
+**Languages:** Python
+**Prerequisites:** Phase 0, Lesson 01
+**Time:** ~45 minutes
+
+## Learning Objectives
+
+- Verify local GPU availability using `nvidia-smi` and PyTorch's CUDA API
+- Configure Google Colab with a T4 GPU for free cloud-based experiments
+- Benchmark matrix multiplication on CPU vs GPU and measure the speedup
+- Estimate the largest model that fits in your VRAM using the fp16 rule of thumb
+
+## The Problem
+
+Most lessons in phases 1-3 run fine on CPU. But once you start training CNNs, transformers, or LLMs (phases 4+), you need GPU acceleration. A training run that takes 8 hours on CPU takes 10 minutes on GPU.
+
+You have three options: local GPU, cloud GPU, or Google Colab (free).
+
+## The Concept
+
+```
+Your options:
+
+1. Local NVIDIA GPU
+   Cost: $0 (you already have it)
+   Setup: Install CUDA + cuDNN
+   Best for: Regular use, large datasets
+
+2. Google Colab (free tier)
+   Cost: $0
+   Setup: None
+   Best for: Quick experiments, no GPU at home
+
+3. Cloud GPU (Lambda, RunPod, Vast.ai)
+   Cost: $0.20-2.00/hr
+   Setup: SSH + install
+   Best for: Serious training, large models
+```
+
+## Build It
+
+### Option 1: Local NVIDIA GPU
+
+Check if you have one:
+
+```bash
+nvidia-smi
+```
+
+Install PyTorch with CUDA:
+
+```python
+import torch
+
+print(f"CUDA available: {torch.cuda.is_available()}")
+print(f"CUDA version: {torch.version.cuda}")
+if torch.cuda.is_available():
+    print(f"GPU: {torch.cuda.get_device_name(0)}")
+    print(f"Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+```
+
+### Option 2: Google Colab
+
+1. Go to [colab.research.google.com](https://colab.research.google.com)
+2. Runtime > Change runtime type > T4 GPU
+3. Run `!nvidia-smi` to verify
+
+Upload notebooks from this course directly to Colab.
+
+### Option 3: Cloud GPU
+
+For Lambda Labs, RunPod, or Vast.ai:
+
+```bash
+ssh user@your-gpu-instance
+
+pip install torch torchvision torchaudio
+python -c "import torch; print(torch.cuda.get_device_name(0))"
+```
+
+### No GPU? No problem.
+
+Most lessons work on CPU. The ones that need GPU will say so and include Colab links.
+
+```python
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using: {device}")
+```
+
+## Build It: GPU vs CPU benchmark
+
+```python
+import torch
+import time
+
+size = 5000
+
+a_cpu = torch.randn(size, size)
+b_cpu = torch.randn(size, size)
+
+start = time.time()
+c_cpu = a_cpu @ b_cpu
+cpu_time = time.time() - start
+print(f"CPU: {cpu_time:.3f}s")
+
+if torch.cuda.is_available():
+    a_gpu = a_cpu.to("cuda")
+    b_gpu = b_cpu.to("cuda")
+
+    torch.cuda.synchronize()
+    start = time.time()
+    c_gpu = a_gpu @ b_gpu
+    torch.cuda.synchronize()
+    gpu_time = time.time() - start
+    print(f"GPU: {gpu_time:.3f}s")
+    print(f"Speedup: {cpu_time / gpu_time:.0f}x")
+```
+
+## Exercises
+
+1. Run the benchmark above and compare CPU vs GPU times
+2. If you don't have a GPU, run it on Google Colab and compare
+3. Check how much GPU memory you have and estimate the largest model you can fit (rule of thumb: 2 bytes per parameter for fp16)
+
+## Key Terms
+
+| Term | What people say | What it actually means |
+|------|----------------|----------------------|
+| CUDA | "GPU programming" | NVIDIA's parallel computing platform that lets you run code on the GPU |
+| VRAM | "GPU memory" | Video RAM on the GPU, separate from system RAM. Limits model size. |
+| fp16 | "Half precision" | 16-bit floating point, uses half the memory of fp32 with minimal accuracy loss |
+| Tensor Core | "Fast matrix hardware" | Specialized GPU cores for matrix multiplication, 4-8x faster than regular cores |
+
+
+================================================================================
+FILE: 00-setup-and-tooling\04-apis-and-keys\quiz.json
+================================================================================
+
+{
+  "questions": [
+    {
+      "stage": "pre",
+      "question": "What is an API key used for when calling an LLM service?",
+      "options": ["Encrypting the data sent to the server", "Authenticating your identity and authorizing requests", "Compressing requests to reduce bandwidth", "Selecting which programming language the server uses"],
+      "correct": 1,
+      "explanation": "An API key is a unique string that identifies your account, authorizes your requests, and allows the provider to track usage and billing."
+    },
+    {
+      "stage": "pre",
+      "question": "Why should API keys never be hardcoded directly in source code?",
+      "options": ["Hardcoded keys make the code run slower", "They can be accidentally committed to git and exposed publicly", "Python cannot read string literals longer than 50 characters", "API providers block keys that appear in source files"],
+      "correct": 1,
+      "explanation": "Hardcoded keys in source code risk being committed to version control and pushed to public repositories, where they can be scraped and abused by others."
+    },
+    {
+      "stage": "post",
+      "question": "What is the recommended way to store API keys for local development?",
+      "options": ["In a Python variable at the top of your script", "In a .env file that is listed in .gitignore", "In the README.md for easy access", "In the requirements.txt alongside package versions"],
+      "correct": 1,
+      "explanation": "A .env file stores keys as environment variables and should be added to .gitignore so it is never committed to version control. SDKs read keys from environment variables automatically."
+    },
+    {
+      "stage": "post",
+      "question": "In the raw HTTP API call to Anthropic, which header carries the API key?",
+      "options": ["Authorization: Bearer sk-ant-...", "x-api-key: sk-ant-...", "Content-Type: application/json", "anthropic-version: 2023-06-01"],
+      "correct": 1,
+      "explanation": "Anthropic's API uses the 'x-api-key' header for authentication, not the more common 'Authorization: Bearer' pattern. This is specific to their API design."
+    },
+    {
+      "stage": "post",
+      "question": "What happens when you exceed an API's rate limit?",
+      "options": ["Your API key is permanently revoked", "The server returns an error (typically HTTP 429) and you must wait before retrying", "Your request is queued and processed later automatically", "The API silently drops your request with no response"],
+      "correct": 1,
+      "explanation": "Rate limiting returns HTTP 429 (Too Many Requests). You need to wait and retry, typically with exponential backoff. Rate limits prevent abuse and ensure fair usage."
+    }
+  ]
+}
+
+
+================================================================================
+FILE: 00-setup-and-tooling\04-apis-and-keys\code\first_api_call.py
+================================================================================
+
+import os
+import json
+import urllib.request
+
+
+def call_with_sdk():
+    try:
+        import anthropic
+    except ImportError:
+        print("Install the SDK: pip install anthropic")
+        return
+
+    client = anthropic.Anthropic()
+    response = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=256,
+        messages=[{"role": "user", "content": "What is a neural network in one sentence?"}]
+    )
+    print(f"SDK response: {response.content[0].text}")
+    print(f"Tokens used: {response.usage.input_tokens} in, {response.usage.output_tokens} out")
+
+
+def call_raw_http():
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        print("Set ANTHROPIC_API_KEY environment variable first")
+        return
+
+    url = "https://api.anthropic.com/v1/messages"
+    headers = {
+        "Content-Type": "application/json",
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+    }
+    body = json.dumps({
+        "model": "claude-sonnet-4-20250514",
+        "max_tokens": 256,
+        "messages": [{"role": "user", "content": "What is a neural network in one sentence?"}],
+    }).encode()
+
+    req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+    with urllib.request.urlopen(req) as resp:
+        result = json.loads(resp.read())
+        print(f"Raw HTTP response: {result['content'][0]['text']}")
+        print(f"Tokens used: {result['usage']['input_tokens']} in, {result['usage']['output_tokens']} out")
+
+
+if __name__ == "__main__":
+    print("=== API Calls ===\n")
+    print("1. Using the SDK:")
+    call_with_sdk()
+    print("\n2. Using raw HTTP:")
+    call_raw_http()
+
+
+================================================================================
+FILE: 00-setup-and-tooling\04-apis-and-keys\docs\en.md
+================================================================================
+
+# APIs & Keys
+
+> Every AI API works the same way: send a request, get a response. The details change, the pattern doesn't.
+
+**Type:** Build
+**Languages:** Python, TypeScript
+**Prerequisites:** Phase 0, Lesson 01
+**Time:** ~30 minutes
+
+## Learning Objectives
+
+- Store API keys securely using environment variables and `.env` files
+- Make an LLM API call using both the Anthropic Python SDK and raw HTTP
+- Compare SDK-based and raw HTTP request/response formats for debugging
+- Identify and handle common API errors including authentication and rate limits
+
+## The Problem
+
+Starting from Phase 11, you'll call LLM APIs (Anthropic, OpenAI, Google). In Phase 13-16 you'll build agents that use these APIs in loops. You need to know how API keys work, how to store them safely, and how to make your first API call.
+
+## The Concept
+
+```mermaid
+sequenceDiagram
+    participant C as Your Code
+    participant S as API Server
+    C->>S: HTTP Request (with API key)
+    S->>C: HTTP Response (JSON)
+```
+
+Every API call has:
+1. An endpoint (URL)
+2. An API key (authentication)
+3. A request body (what you want)
+4. A response body (what you get back)
+
+## Build It
+
+### Step 1: Store API keys safely
+
+Never put API keys in code. Use environment variables.
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+export OPENAI_API_KEY="sk-..."
+```
+
+Or use a `.env` file (add it to `.gitignore`):
+
+```
+ANTHROPIC_API_KEY=sk-ant-...
+OPENAI_API_KEY=sk-...
+```
+
+### Step 2: First API call (Python)
+
+```python
+import anthropic
+
+client = anthropic.Anthropic()
+
+response = client.messages.create(
+    model="claude-sonnet-4-20250514",
+    max_tokens=256,
+    messages=[{"role": "user", "content": "What is a neural network in one sentence?"}]
+)
+
+print(response.content[0].text)
+```
+
+### Step 3: First API call (TypeScript)
+
+```typescript
+import Anthropic from "@anthropic-ai/sdk";
+
+const client = new Anthropic();
+
+const response = await client.messages.create({
+  model: "claude-sonnet-4-20250514",
+  max_tokens: 256,
+  messages: [{ role: "user", content: "What is a neural network in one sentence?" }],
+});
+
+console.log(response.content[0].text);
+```
+
+### Step 4: Raw HTTP (no SDK)
+
+```python
+import os
+import urllib.request
+import json
+
+url = "https://api.anthropic.com/v1/messages"
+headers = {
+    "Content-Type": "application/json",
+    "x-api-key": os.environ["ANTHROPIC_API_KEY"],
+    "anthropic-version": "2023-06-01",
+}
+body = json.dumps({
+    "model": "claude-sonnet-4-20250514",
+    "max_tokens": 256,
+    "messages": [{"role": "user", "content": "What is a neural network in one sentence?"}],
+}).encode()
+
+req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+with urllib.request.urlopen(req) as resp:
+    result = json.loads(resp.read())
+    print(result["content"][0]["text"])
+```
+
+This is what the SDKs do under the hood. Understanding the raw HTTP call helps when debugging.
+
+## Use It
+
+For this course:
+
+| API | When you need it | Free tier |
+|-----|-----------------|-----------|
+| Anthropic (Claude) | Phases 11-16 (agents, tools) | $5 credit on signup |
+| OpenAI | Phase 11 (comparison) | $5 credit on signup |
+| Hugging Face | Phases 4-10 (models, datasets) | Free |
+
+You don't need all of them right now. Set them up when the lesson requires it.
+
+## Ship It
+
+This lesson produces:
+- `outputs/prompt-api-troubleshooter.md` - diagnose common API errors
+
+## Exercises
+
+1. Get an Anthropic API key and make your first API call
+2. Try the raw HTTP version and compare the response format to the SDK version
+3. Intentionally use a wrong API key and read the error message
+
+## Key Terms
+
+| Term | What people say | What it actually means |
+|------|----------------|----------------------|
+| API key | "Password for the API" | A unique string that identifies your account and authorizes requests |
+| Rate limit | "They're throttling me" | Maximum requests per minute/hour to prevent abuse and ensure fair usage |
+| Token | "A word" (in API context) | A billing unit: input and output tokens are counted and charged separately |
+| Streaming | "Real-time responses" | Getting the response word by word instead of waiting for the full response |
+
+
+================================================================================
+FILE: 00-setup-and-tooling\04-apis-and-keys\outputs\prompt-api-troubleshooter.md
+================================================================================
+
+---
+name: prompt-api-troubleshooter
+description: Diagnose and fix common AI API errors (auth, rate limits, timeouts)
+phase: 0
+lesson: 4
+---
+
+You diagnose AI API errors. When someone shares an error, identify the cause and give the fix.
+
+Common errors and fixes:
+
+- **401 Unauthorized**: API key is wrong or missing. Check the environment variable is set and the key is valid.
+- **403 Forbidden**: API key doesn't have permission for this endpoint or model.
+- **429 Too Many Requests**: Rate limited. Wait and retry, or reduce request frequency.
+- **400 Bad Request**: Request body is malformed. Check required fields, model name spelling, message format.
+- **500/502/503**: Server-side issue. Wait a minute and retry.
+- **Timeout**: Request took too long. Reduce max_tokens or use streaming.
+- **Connection refused**: Wrong base URL or network issue. Check the endpoint URL.
+
+Diagnostic steps:
+1. Is the API key set? `echo $ANTHROPIC_API_KEY | head -c 10`
+2. Is the key valid? Try a minimal request.
+3. Is the request format correct? Compare to the docs.
+4. Is there a network issue? `curl -I https://api.anthropic.com`
+
+
+================================================================================
+FILE: 00-setup-and-tooling\05-jupyter-notebooks\quiz.json
+================================================================================
+
+{
+  "questions": [
+    {
+      "stage": "pre",
+      "question": "What is a Jupyter notebook?",
+      "options": ["A text editor for writing Python scripts", "An interactive document that mixes executable code cells with markdown text and inline outputs", "A version control system for data science projects", "A package manager for Python libraries"],
+      "correct": 1,
+      "explanation": "A Jupyter notebook (.ipynb) is an interactive environment where you can write and execute code in cells, see outputs inline, and mix code with formatted text explanations."
+    },
+    {
+      "stage": "pre",
+      "question": "What does the Jupyter kernel do?",
+      "options": ["Formats markdown cells into HTML", "Runs the code in cells and keeps variables in memory between executions", "Manages file storage for the notebook", "Connects the notebook to GitHub for version control"],
+      "correct": 1,
+      "explanation": "The kernel is a separate Python process that executes cell code and maintains state (variables, imports) in memory. All cells in a notebook share the same kernel."
+    },
+    {
+      "stage": "post",
+      "question": "What is the difference between %timeit and %%time magic commands?",
+      "options": ["%timeit measures wall time, %%time measures CPU time", "%timeit runs code many times and averages, %%time runs code once", "%timeit works on single lines, %%time works on the whole notebook", "There is no difference, they are aliases"],
+      "correct": 1,
+      "explanation": "%timeit runs the statement many times for a statistical average (good for microbenchmarks). %%time runs the cell once and reports wall time (good for training runs)."
+    },
+    {
+      "stage": "post",
+      "question": "What is the most common cause of a notebook working on your machine but failing when someone runs it top to bottom?",
+      "options": ["Using a different Python version", "Out-of-order cell execution creating hidden dependencies on execution order", "Missing the %matplotlib inline magic command", "Using too many markdown cells"],
+      "correct": 1,
+      "explanation": "Running cells out of order creates hidden state dependencies. A variable might exist because you ran cell 5 before cell 2. Kernel > Restart & Run All verifies linear execution."
+    },
+    {
+      "stage": "post",
+      "question": "When should you move code from a notebook into a .py script?",
+      "options": ["As soon as you write more than 10 lines of code", "When the code is a reusable utility, training pipeline, or production code", "Never -- notebooks are always better for AI work", "Only when you need to run on a GPU"],
+      "correct": 1,
+      "explanation": "The rule is 'explore in notebooks, ship in scripts.' Reusable utilities, training pipelines, and anything running in production should be .py files. Notebooks are for exploration and prototyping."
+    }
+  ]
+}
+
+
+================================================================================
+FILE: 00-setup-and-tooling\05-jupyter-notebooks\code\notebook_tips.py
+================================================================================
+
+import time
+import sys
+
+import numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import pandas as pd
+
+
+def timing_comparison():
+    print("=== Timing: List vs NumPy ===\n")
+
+    size = 1_000_000
+
+    start = time.perf_counter()
+    python_list = [x ** 2 for x in range(size)]
+    list_time = time.perf_counter() - start
+    print(f"List comprehension: {list_time:.4f}s")
+
+    start = time.perf_counter()
+    numpy_array = np.arange(size) ** 2
+    numpy_time = time.perf_counter() - start
+    print(f"NumPy:              {numpy_time:.4f}s")
+    print(f"Speedup:            {list_time / numpy_time:.1f}x")
+
+
+def inline_plotting():
+    print("\n=== Inline Plotting ===\n")
+
+    np.random.seed(42)
+    x = np.linspace(0, 10, 200)
+    y_sin = np.sin(x)
+    y_noisy = y_sin + np.random.normal(0, 0.2, 200)
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+
+    axes[0].plot(x, y_sin, label="sin(x)")
+    axes[0].plot(x, y_noisy, alpha=0.5, label="noisy")
+    axes[0].set_title("Signal vs Noise")
+    axes[0].legend()
+
+    axes[1].hist(y_noisy - y_sin, bins=30, edgecolor="black")
+    axes[1].set_title("Noise Distribution")
+
+    plt.tight_layout()
+    plt.savefig("notebook_plot.png", dpi=100)
+    print("Saved plot to notebook_plot.png")
+    print("In a notebook, plt.show() displays this inline.")
+
+
+def dataframe_display():
+    print("\n=== DataFrame Display ===\n")
+
+    df = pd.DataFrame({
+        "model": ["Linear Regression", "Random Forest", "Neural Network", "XGBoost"],
+        "accuracy": [0.72, 0.89, 0.94, 0.91],
+        "train_time_sec": [0.1, 2.3, 45.6, 8.2],
+        "parameters": [102, 50_000, 1_200_000, 25_000],
+    })
+
+    print("In a notebook, just typing 'df' renders a rich HTML table:\n")
+    print(df.to_string(index=False))
+
+    print(f"\nBest model: {df.loc[df['accuracy'].idxmax(), 'model']}")
+    print(f"Fastest model: {df.loc[df['train_time_sec'].idxmin(), 'model']}")
+
+
+def memory_check():
+    print("\n=== Memory Usage ===\n")
+
+    small = np.random.randn(1000)
+    medium = np.random.randn(100_000)
+    large = np.random.randn(10_000_000)
+
+    for name, arr in [("1K", small), ("100K", medium), ("10M", large)]:
+        size_mb = arr.nbytes / 1e6
+        print(f"Array {name:>4s} elements: {size_mb:>8.2f} MB")
+
+    print(f"\nPython process memory: ~{sys.getsizeof(large) / 1e6:.1f} MB for the large array")
+    print("In notebooks, memory accumulates across cells. Restart the kernel to free it.")
+
+
+def magic_command_equivalents():
+    print("\n=== Magic Command Equivalents ===\n")
+    print("In a notebook, you would use magic commands:")
+    print("  %timeit np.random.randn(10000)    -> micro-benchmark")
+    print("  %%time long_operation()            -> wall clock time")
+    print("  %matplotlib inline                 -> show plots in cells")
+    print("  !pip install package               -> install from notebook")
+    print("  %env VAR                           -> check env variable")
+    print()
+
+    iterations = 1000
+    start = time.perf_counter()
+    for _ in range(iterations):
+        np.random.randn(10000)
+    elapsed = time.perf_counter() - start
+    per_call = elapsed / iterations * 1e6
+
+    print(f"Manual timing (like %%timeit): np.random.randn(10000)")
+    print(f"  {per_call:.1f} us per call ({iterations} iterations)")
+
+
+if __name__ == "__main__":
+    print("Notebook Tips - Key Patterns\n")
+    print("Run these in a Jupyter notebook to see rich output.\n")
+
+    timing_comparison()
+    inline_plotting()
+    dataframe_display()
+    memory_check()
+    magic_command_equivalents()
+
+
+================================================================================
+FILE: 00-setup-and-tooling\05-jupyter-notebooks\docs\en.md
+================================================================================
+
+# Jupyter Notebooks
+
+> Notebooks are the lab bench of AI engineering. You prototype here, then move what works into production.
+
+**Type:** Build
+**Languages:** Python
+**Prerequisites:** Phase 0, Lesson 01
+**Time:** ~30 minutes
+
+## Learning Objectives
+
+- Install and launch JupyterLab, Jupyter Notebook, or VS Code with the Jupyter extension
+- Use magic commands (`%timeit`, `%%time`, `%matplotlib inline`) to benchmark and visualize inline
+- Distinguish when to use notebooks vs scripts and apply the "explore in notebooks, ship in scripts" workflow
+- Identify and avoid common notebook traps: out-of-order execution, hidden state, and memory leaks
+
+## The Problem
+
+Every AI paper, tutorial, and Kaggle competition uses Jupyter notebooks. They let you run code in pieces, see outputs inline, mix code with explanations, and iterate fast. If you try to learn AI without notebooks, you're doing math homework without scratch paper.
+
+But notebooks have real traps. People use them for everything, including things they're terrible at. Knowing when to use a notebook and when to use a script will save you from debugging nightmares later.
+
+## The Concept
+
+A notebook is a list of cells. Each cell is either code or text.
+
+```mermaid
+graph TD
+    A["**Markdown Cell**\n# My Experiment\nTesting learning rate 0.01"] --> B["**Code Cell** ► Run\nmodel.fit(X, y, lr=0.01)\n---\nOutput: loss = 0.342"]
+    B --> C["**Code Cell** ► Run\nplt.plot(losses)\n---\nOutput: inline plot"]
+```
+
+The kernel is a Python process running in the background. When you run a cell, it sends the code to the kernel, which executes it and sends back the result. All cells share the same kernel, so variables persist between cells.
+
+```mermaid
+graph LR
+    A[Notebook UI] <--> B[Kernel\nPython process]
+    B --> C[Keeps variables in memory]
+    B --> D[Runs cells in whatever order you click]
+    B --> E[Dies when you restart it]
+```
+
+That "whatever order you click" part is both the superpower and the foot-gun.
+
+## Build It
+
+### Step 1: Pick your interface
+
+Three options, one format:
+
+| Interface | Install | Best for |
+|-----------|---------|----------|
+| JupyterLab | `pip install jupyterlab` then `jupyter lab` | Full IDE experience, multiple tabs, file browser, terminal |
+| Jupyter Notebook | `pip install notebook` then `jupyter notebook` | Simple, lightweight, one notebook at a time |
+| VS Code | Install "Jupyter" extension | Already in your editor, git integration, debugging |
+
+All three read and write the same `.ipynb` file. Pick whatever you like. JupyterLab is the most common in AI work.
+
+```bash
+pip install jupyterlab
+jupyter lab
+```
+
+### Step 2: Keyboard shortcuts that matter
+
+You operate in two modes. Press `Escape` for command mode (blue bar on the left), `Enter` for edit mode (green bar).
+
+**Command mode (most used):**
+
+| Key | Action |
+|-----|--------|
+| `Shift+Enter` | Run cell, move to next |
+| `A` | Insert cell above |
+| `B` | Insert cell below |
+| `DD` | Delete cell |
+| `M` | Convert to markdown |
+| `Y` | Convert to code |
+| `Z` | Undo cell operation |
+| `Ctrl+Shift+H` | Show all shortcuts |
+
+**Edit mode:**
+
+| Key | Action |
+|-----|--------|
+| `Tab` | Autocomplete |
+| `Shift+Tab` | Show function signature |
+| `Ctrl+/` | Toggle comment |
+
+`Shift+Enter` is the one you'll use a thousand times a day. Learn it first.
+
+### Step 3: Cell types
+
+**Code cells** run Python and show the output:
+
+```python
+import numpy as np
+data = np.random.randn(1000)
+data.mean(), data.std()
+```
+
+Output: `(0.0032, 0.9987)`
+
+**Markdown cells** render formatted text. Use them to document what you're doing and why. Supports headers, bold, italic, LaTeX math (`$E = mc^2$`), tables, and images.
+
+### Step 4: Magic commands
+
+These aren't Python. They're Jupyter-specific commands that start with `%` (line magic) or `%%` (cell magic).
+
+**Time your code:**
+
+```python
+%timeit np.random.randn(10000)
+```
+
+Output: `45.2 us +/- 1.3 us per loop`
+
+```python
+%%time
+model.fit(X_train, y_train, epochs=10)
+```
+
+Output: `Wall time: 2.34 s`
+
+`%timeit` runs the code many times and averages. `%%time` runs it once. Use `%timeit` for microbenchmarks, `%%time` for training runs.
+
+**Enable inline plots:**
+
+```python
+%matplotlib inline
+```
+
+Every `plt.plot()` or `plt.show()` now renders directly in the notebook.
+
+**Install packages without leaving the notebook:**
+
+```python
+!pip install scikit-learn
+```
+
+The `!` prefix runs any shell command.
+
+**Check environment variables:**
+
+```python
+%env CUDA_VISIBLE_DEVICES
+```
+
+### Step 5: Display rich output inline
+
+Notebooks auto-display the last expression in a cell. But you can control it:
+
+```python
+import pandas as pd
+
+df = pd.DataFrame({
+    "model": ["Linear", "Random Forest", "Neural Net"],
+    "accuracy": [0.72, 0.89, 0.94],
+    "training_time": [0.1, 2.3, 45.6]
+})
+df
+```
+
+This renders a formatted HTML table, not a text dump. Same with plots:
+
+```python
+import matplotlib.pyplot as plt
+
+plt.figure(figsize=(8, 4))
+plt.plot([1, 2, 3, 4], [1, 4, 2, 3])
+plt.title("Inline Plot")
+plt.show()
+```
+
+The plot appears right below the cell. This is why notebooks dominate AI work. You see the data, the plot, and the code together.
+
+For images:
+
+```python
+from IPython.display import Image, display
+display(Image(filename="architecture.png"))
+```
+
+### Step 6: Google Colab
+
+Colab is a free Jupyter notebook in the cloud. It gives you a GPU, pre-installed libraries, and Google Drive integration. No setup required.
+
+1. Go to [colab.research.google.com](https://colab.research.google.com)
+2. Upload any `.ipynb` file from this course
+3. Runtime > Change runtime type > T4 GPU (free)
+
+Colab differences from local Jupyter:
+- Files don't persist between sessions (save to Drive or download)
+- Pre-installed: numpy, pandas, matplotlib, torch, tensorflow, sklearn
+- `from google.colab import files` to upload/download files
+- `from google.colab import drive; drive.mount('/content/drive')` for persistent storage
+- Sessions time out after 90 minutes of inactivity (free tier)
+
+## Use It
+
+### Notebooks vs Scripts: When to use which
+
+| Use notebooks for | Use scripts for |
+|-------------------|-----------------|
+| Exploring a dataset | Training pipelines |
+| Prototyping a model | Reusable utilities |
+| Visualizing results | Anything with `if __name__` |
+| Explaining your work | Code that runs on a schedule |
+| Quick experiments | Production code |
+| Course exercises | Packages and libraries |
+
+The rule: **explore in notebooks, ship in scripts**.
+
+A common workflow in AI:
+1. Explore data in a notebook
+2. Prototype your model in the notebook
+3. Once it works, move the code to `.py` files
+4. Import those `.py` files back into the notebook for further experiments
+
+### Common traps
+
+**Out-of-order execution.** You run cell 5, then cell 2, then cell 7. The notebook works on your machine but breaks when someone runs it top to bottom. Fix: Kernel > Restart & Run All before sharing.
+
+**Hidden state.** You delete a cell but the variable it created is still in memory. The notebook looks clean but depends on a ghost cell. Fix: Restart the kernel regularly.
+
+**Memory leaks.** Loading a 4GB dataset, training a model, loading another dataset. Nothing gets freed. Fix: `del variable_name` and `gc.collect()`, or restart the kernel.
+
+## Ship It
+
+This lesson produces:
+- `outputs/prompt-notebook-helper.md` for debugging notebook issues
+
+## Exercises
+
+1. Open JupyterLab, create a notebook, and use `%timeit` to compare list comprehension vs numpy for creating an array of 100,000 random numbers
+2. Create a notebook with both markdown and code cells that loads a CSV, displays a dataframe, and plots a chart. Then run Kernel > Restart & Run All to verify it works top to bottom
+3. Take the code from `code/notebook_tips.py`, paste it into a Colab notebook, and run it with a free GPU
+
+## Key Terms
+
+| Term | What people say | What it actually means |
+|------|----------------|----------------------|
+| Kernel | "The thing running my code" | A separate Python process that executes cells and keeps variables in memory |
+| Cell | "A code block" | An independently runnable unit in a notebook, either code or markdown |
+| Magic command | "Jupyter tricks" | Special commands prefixed with `%` or `%%` that control the notebook environment |
+| `.ipynb` | "Notebook file" | A JSON file containing cells, outputs, and metadata. Stands for IPython Notebook |
+
+## Further Reading
+
+- [JupyterLab Docs](https://jupyterlab.readthedocs.io/) for the full feature set
+- [Google Colab FAQ](https://research.google.com/colaboratory/faq.html) for Colab-specific limits and features
+- [28 Jupyter Notebook Tips](https://www.dataquest.io/blog/jupyter-notebook-tips-tricks-shortcuts/) for power-user shortcuts
+
+
+================================================================================
+FILE: 00-setup-and-tooling\05-jupyter-notebooks\outputs\prompt-notebook-helper.md
+================================================================================
+
+---
+name: prompt-notebook-helper
+description: Debug Jupyter notebook issues including kernel crashes, memory problems, and display failures
+phase: 0
+lesson: 5
+---
+
+You diagnose Jupyter notebook problems. When someone describes an issue, identify the cause and give the fix.
+
+Common issues and fixes:
+
+**Kernel crashes:**
+- Out of memory: The dataset or model is too large. Fix: reduce batch size, load data in chunks with `pd.read_csv(path, chunksize=10000)`, use `del variable` then `gc.collect()`, or switch to a machine with more RAM.
+- Segfault from native library: Usually a version mismatch between numpy/torch/tensorflow and the system libraries. Fix: create a fresh virtual environment and reinstall.
+- Kernel dies silently: Check the terminal where Jupyter is running for the actual error message. The notebook UI often hides it.
+
+**Display problems:**
+- Plots not showing: Add `%matplotlib inline` at the top of the notebook. If using JupyterLab, try `%matplotlib widget` for interactive plots (requires `ipympl`).
+- DataFrame shows as text instead of HTML table: Make sure the dataframe is the last expression in the cell, not inside a `print()` call. `print(df)` gives text, just `df` gives the rich table.
+- Images not rendering: Use `from IPython.display import Image, display` then `display(Image(filename="path.png"))`.
+- LaTeX not rendering in markdown: Check for missing dollar signs. Inline: `$x^2$`. Block: `$$\sum_{i=0}^n x_i$$`.
+
+**Memory issues:**
+- Notebook uses too much RAM: Variables persist across all cells. Run `%who` to see all variables. Delete large ones with `del var_name` and run `import gc; gc.collect()`.
+- Memory keeps growing: You are probably reassigning large variables without freeing the old ones. Restart the kernel (Kernel > Restart) to clear everything.
+- Loading multiple large datasets: Use generators or chunked reading. `pd.read_csv(path, chunksize=N)` returns an iterator instead of loading everything at once.
+
+**Execution issues:**
+- Notebook works for me but not others: Cells were run out of order. Fix: Kernel > Restart & Run All. If it fails, you have a hidden dependency on a deleted or reordered cell.
+- Cell runs forever (hanging): The code might be waiting for input (`input()`), stuck in an infinite loop, or blocked on a network request. Interrupt with Kernel > Interrupt (or press `I` twice in command mode).
+- Import errors after pip install: The package installed in a different Python than the kernel is using. Fix: run `!pip install package` inside the notebook, or check `!which python` matches your environment.
+
+**Colab-specific:**
+- Session disconnected: Free Colab times out after 90 minutes of inactivity. Save work to Google Drive or download files.
+- GPU not available: Runtime > Change runtime type > select GPU. If all GPUs are busy, try again later or use Colab Pro.
+- Files disappeared: Colab wipes the filesystem between sessions. Mount Google Drive for persistent storage: `from google.colab import drive; drive.mount('/content/drive')`.
+
+Diagnostic steps:
+1. What is the exact error message? (Check both the notebook and the terminal)
+2. Does the issue happen after restarting the kernel and running all cells top to bottom?
+3. How much data are you loading? (`df.info()` for dataframes, `tensor.shape` and `tensor.dtype` for tensors)
+4. What environment are you using? (Local JupyterLab, VS Code, Colab)
+5. Were packages installed in the same environment as the kernel? (`!which python` and `import sys; sys.executable`)
+
+
+================================================================================
+FILE: 00-setup-and-tooling\06-python-environments\quiz.json
+================================================================================
+
+{
+  "questions": [
+    {
+      "stage": "pre",
+      "question": "What problem do virtual environments solve?",
+      "options": ["They make Python code run faster by optimizing the interpreter", "They isolate project dependencies so different projects can use different package versions", "They provide a graphical interface for managing Python scripts", "They automatically update packages to the latest versions"],
+      "correct": 1,
+      "explanation": "Virtual environments give each project its own isolated set of packages. Without them, installing PyTorch 2.4 for one project would overwrite PyTorch 2.1 needed by another."
+    },
+    {
+      "stage": "pre",
+      "question": "What is a lockfile in the context of Python dependency management?",
+      "options": ["A file that prevents other users from editing your code", "A file that pins every package to an exact version for reproducible installs", "A file that locks the Python interpreter version", "A file that encrypts your project dependencies"],
+      "correct": 1,
+      "explanation": "A lockfile records the exact version of every package (including transitive dependencies) so anyone installing from it gets identical packages, ensuring reproducibility."
+    },
+    {
+      "stage": "post",
+      "question": "How can you verify that your pip and python commands are using the virtual environment and not the system Python?",
+      "options": ["Run 'pip --version' and check the version number", "Run 'which python' and confirm it shows .venv/bin/python, not /usr/bin/python", "Check if the terminal background color has changed", "Run 'python --check-env' to verify"],
+      "correct": 1,
+      "explanation": "'which python' (or 'where python' on Windows) shows the full path to the interpreter. If it points to .venv/bin/python, you are in the virtual environment."
+    },
+    {
+      "stage": "post",
+      "question": "Why is mixing pip and conda in the same environment problematic?",
+      "options": ["Pip packages are incompatible with conda's Python interpreter", "Pip installs can break conda's dependency tracking, causing hard-to-debug conflicts", "Conda cannot install packages that pip has already installed", "It doubles the disk space used by every package"],
+      "correct": 1,
+      "explanation": "Conda maintains its own dependency solver. Pip installs bypass it, so conda no longer knows the true state of the environment. This leads to dependency conflicts that are painful to resolve."
+    },
+    {
+      "stage": "post",
+      "question": "Your PyTorch code reports 'CUDA not available' despite having an NVIDIA GPU. What is the most likely cause?",
+      "options": ["Your GPU does not support CUDA", "PyTorch was installed with a CUDA version incompatible with your GPU driver", "You forgot to import the torch.cuda module", "Virtual environments cannot access GPU hardware"],
+      "correct": 1,
+      "explanation": "PyTorch ships CUDA bindings compiled for specific CUDA versions. If the PyTorch CUDA version exceeds your driver's CUDA version, CUDA will not be available. Check with nvidia-smi and torch.version.cuda."
+    }
+  ]
+}
+
+
+================================================================================
+FILE: 00-setup-and-tooling\06-python-environments\docs\en.md
+================================================================================
+
+# Python Environments
+
+> Dependency hell is real. Virtual environments are the cure.
+
+**Type:** Build
+**Languages:** Shell
+**Prerequisites:** Phase 0, Lesson 01
+**Time:** ~30 minutes
+
+## Learning Objectives
+
+- Create isolated virtual environments using `uv`, `venv`, or `conda`
+- Write a `pyproject.toml` with optional dependency groups and generate lockfiles for reproducibility
+- Diagnose and fix common pitfalls: global installs, pip/conda mixing, CUDA version mismatches
+- Implement a per-phase environment strategy for projects with conflicting dependencies
+
+## The Problem
+
+You install PyTorch 2.4 for a fine-tuning project. Next week, a different project needs PyTorch 2.1 because its CUDA build is pinned. You upgrade globally, and the first project breaks. You downgrade, and the second one breaks.
+
+This is dependency hell. It happens constantly in AI/ML work because:
+
+- PyTorch, JAX, and TensorFlow each ship their own CUDA bindings
+- Model libraries pin specific framework versions
+- A global `pip install` overwrites whatever was there before
+- CUDA 11.8 builds don't work with CUDA 12.x drivers (and vice versa)
+
+The fix: every project gets its own isolated environment with its own packages.
+
+## The Concept
+
+```mermaid
+graph TD
+    subgraph without["Without virtual environments"]
+        SP[System Python] --> T24["torch 2.4.0 (CUDA 12.4)\nProject A needs this"]
+        SP --> T21["torch 2.1.0 (CUDA 11.8)\nProject B needs this"]
+        SP --> CONFLICT["CONFLICT: only one\ntorch version can exist"]
+    end
+
+    subgraph with["With virtual environments"]
+        PA["Project A (.venv/)"] --> PA1["torch 2.4.0 (CUDA 12.4)"]
+        PA --> PA2["transformers 4.44"]
+        PB["Project B (.venv/)"] --> PB1["torch 2.1.0 (CUDA 11.8)"]
+        PB --> PB2["diffusers 0.28"]
+    end
+```
+
+## Build It
+
+### Option 1: uv venv (Recommended)
+
+`uv` is the fastest Python package manager (10-100x faster than pip). It handles virtual environments, Python versions, and dependency resolution in one tool.
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+uv python install 3.12
+
+cd your-project
+uv venv
+source .venv/bin/activate
+```
+
+Install packages:
+
+```bash
+uv pip install torch numpy
+```
+
+Create a project with `pyproject.toml` in one step:
+
+```bash
+uv init my-ai-project
+cd my-ai-project
+uv add torch numpy matplotlib
+```
+
+### Option 2: venv (Built-in)
+
+If you can't install `uv`, Python ships with `venv`:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate  # Linux/macOS
+.venv\Scripts\activate     # Windows
+
+pip install torch numpy
+```
+
+Slower than `uv`, but works everywhere Python is installed.
+
+### Option 3: conda (When You Need It)
+
+Conda manages non-Python dependencies like CUDA toolkits, cuDNN, and C libraries. Use it when:
+
+- You need a specific CUDA toolkit version without installing it system-wide
+- You're on a shared cluster where you can't install system packages
+- A library's install instructions say "use conda"
+
+```bash
+# Install miniconda (not the full Anaconda)
+curl -LsSf https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -o miniconda.sh
+bash miniconda.sh -b
+
+conda create -n myproject python=3.12
+conda activate myproject
+
+conda install pytorch torchvision torchaudio pytorch-cuda=12.4 -c pytorch -c nvidia
+```
+
+One rule: if you use conda for an environment, use conda for all packages in that environment. Mixing `pip install` into a conda env causes dependency conflicts that are painful to debug.
+
+### For This Course: Per-Phase Strategy
+
+You could create one environment for the whole course. Don't. Different phases need different (sometimes conflicting) dependencies.
+
+Strategy:
+
+```
+ai-engineering-from-scratch/
+├── .venv/                    <-- shared lightweight env for phases 0-3
+├── phases/
+│   ├── 04-neural-networks/
+│   │   └── .venv/            <-- PyTorch env
+│   ├── 05-cnns/
+│   │   └── .venv/            <-- same PyTorch env (symlink or shared)
+│   ├── 08-transformers/
+│   │   └── .venv/            <-- might need different transformer versions
+│   └── 11-llm-apis/
+│       └── .venv/            <-- API SDKs, no torch needed
+```
+
+The script in `code/env_setup.sh` creates the base environment for this course.
+
+## pyproject.toml Basics
+
+Every Python project should have a `pyproject.toml`. It replaces `setup.py`, `setup.cfg`, and `requirements.txt` in one file.
+
+```toml
+[project]
+name = "ai-engineering-from-scratch"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "matplotlib>=3.8",
+    "jupyter>=1.0",
+    "scikit-learn>=1.4",
+]
+
+[project.optional-dependencies]
+torch = ["torch>=2.3", "torchvision>=0.18"]
+llm = ["anthropic>=0.39", "openai>=1.50"]
+```
+
+Then install:
+
+```bash
+uv pip install -e ".[torch]"    # base + PyTorch
+uv pip install -e ".[llm]"     # base + LLM SDKs
+uv pip install -e ".[torch,llm]" # everything
+```
+
+## Lockfiles
+
+A lockfile pins every dependency (including transitive ones) to exact versions. This guarantees reproducibility: anyone who installs from the lockfile gets exactly the same packages.
+
+```bash
+# uv generates uv.lock automatically when using uv add
+uv add numpy
+
+# pip-tools approach
+uv pip compile pyproject.toml -o requirements.lock
+uv pip install -r requirements.lock
+```
+
+Commit your lockfile to git. When someone clones the repo, they install from the lockfile and get identical versions.
+
+## Common Mistakes
+
+### 1. Installing globally
+
+```bash
+pip install torch  # BAD: installs to system Python
+
+source .venv/bin/activate
+pip install torch  # GOOD: installs to virtual environment
+```
+
+Check where your packages go:
+
+```bash
+which python       # should show .venv/bin/python, not /usr/bin/python
+which pip           # should show .venv/bin/pip
+```
+
+### 2. Mixing pip and conda
+
+```bash
+conda create -n myenv python=3.12
+conda activate myenv
+conda install pytorch -c pytorch
+pip install some-other-package   # BAD: can break conda's dependency tracking
+conda install some-other-package # GOOD: let conda manage everything
+```
+
+If you must use pip inside conda (some packages are pip-only), install all conda packages first, then pip packages last.
+
+### 3. Forgetting to activate
+
+```bash
+python train.py           # uses system Python, missing packages
+source .venv/bin/activate
+python train.py           # uses project Python, packages found
+```
+
+Your shell prompt should show the environment name:
+
+```
+(.venv) $ python train.py
+```
+
+### 4. Committing .venv to git
+
+```bash
+echo ".venv/" >> .gitignore
+```
+
+Virtual environments are 200MB-2GB. They're local, not portable between machines. Commit `pyproject.toml` and the lockfile instead.
+
+### 5. CUDA version mismatch
+
+```bash
+nvidia-smi                # shows driver CUDA version (e.g., 12.4)
+python -c "import torch; print(torch.version.cuda)"  # shows PyTorch CUDA version
+
+# These must be compatible.
+# PyTorch CUDA version must be <= driver CUDA version.
+```
+
+## Use It
+
+Run the setup script to create your course environment:
+
+```bash
+bash phases/00-setup-and-tooling/06-python-environments/code/env_setup.sh
+```
+
+This creates a `.venv` at the repo root with core dependencies installed and verified.
+
+## Exercises
+
+1. Run `env_setup.sh` and verify all checks pass
+2. Create a second virtual environment, install a different version of numpy in it, and confirm the two environments are isolated
+3. Write a `pyproject.toml` for a project that needs both PyTorch and the Anthropic SDK
+4. Deliberately install a package globally (without activating a venv), notice where it goes, then uninstall it
+
+## Key Terms
+
+| Term | What people say | What it actually means |
+|------|----------------|----------------------|
+| Virtual environment | "A venv" | An isolated directory containing a Python interpreter and packages, separate from the system Python |
+| Lockfile | "Pinned dependencies" | A file listing every package and its exact version, guaranteeing identical installs across machines |
+| pyproject.toml | "The new setup.py" | The standard Python project configuration file, replacing setup.py/setup.cfg/requirements.txt |
+| Transitive dependency | "A dependency of a dependency" | Package B depends on C; if you install A which depends on B, C is a transitive dependency of A |
+| CUDA mismatch | "My GPU isn't working" | PyTorch was compiled for a different CUDA version than what your GPU driver supports |
+
+
+================================================================================
+FILE: 00-setup-and-tooling\07-docker-for-ai\quiz.json
+================================================================================
+
+{
+  "questions": [
+    {
+      "stage": "pre",
+      "question": "What is the primary difference between a Docker container and a virtual machine?",
+      "options": ["Containers are slower but more secure than VMs", "Containers share the host OS kernel while VMs run their own full OS", "Containers can only run Linux while VMs support any OS", "There is no practical difference"],
+      "correct": 1,
+      "explanation": "Containers share the host kernel and isolate at the process level, making them start in seconds. VMs run a complete guest OS with its own kernel, requiring more resources and slower startup."
+    },
+    {
+      "stage": "pre",
+      "question": "What is a Dockerfile?",
+      "options": ["A configuration file for the Docker daemon", "A set of instructions for building a Docker image layer by layer", "A log file that records container activity", "A file that lists running containers"],
+      "correct": 1,
+      "explanation": "A Dockerfile contains sequential instructions (FROM, RUN, COPY, etc.) that Docker executes to build an image. Each instruction creates a cached layer."
+    },
+    {
+      "stage": "post",
+      "question": "Why are volume mounts critical for AI development with Docker?",
+      "options": ["Volumes make containers run faster by using host disk speed", "Volumes persist data (models, datasets, code) across container rebuilds so you don't re-download gigabytes each time", "Volumes are required for Python packages to install correctly", "Volumes allow multiple containers to share the same GPU"],
+      "correct": 1,
+      "explanation": "Without volumes, everything inside a container is lost when it stops. Volume mounts map host directories into the container, so model weights (14+ GB) and datasets survive rebuilds."
+    },
+    {
+      "stage": "post",
+      "question": "What does the NVIDIA Container Toolkit enable?",
+      "options": ["Installing CUDA drivers inside the container", "Exposing host GPUs to Docker containers via the --gpus flag", "Running NVIDIA GPU containers on AMD hardware", "Compiling CUDA code during the Docker build process"],
+      "correct": 1,
+      "explanation": "The NVIDIA Container Toolkit is a runtime hook that exposes host GPUs to containers. The CUDA toolkit lives inside the container, but the GPU driver is shared from the host."
+    },
+    {
+      "stage": "post",
+      "question": "In a Docker Compose file for AI, how does the 'ai-dev' service reach the 'qdrant' vector database?",
+      "options": ["By using the host machine's IP address and port", "By using the service name 'qdrant' as the hostname, since Compose creates a shared network", "By mounting a shared volume between the two containers", "By configuring a VPN between the containers"],
+      "correct": 1,
+      "explanation": "Docker Compose automatically creates a shared network where services can reach each other by name. The ai-dev container connects to 'http://qdrant:6333' using the service name as hostname."
+    }
+  ]
+}
+
+
+================================================================================
+FILE: 00-setup-and-tooling\07-docker-for-ai\code\Dockerfile
+================================================================================
+
+FROM nvidia/cuda:12.4.1-devel-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.12 \
+    python3.12-venv \
+    python3.12-dev \
+    python3-pip \
+    git \
+    curl \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1
+
+RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel
+
+RUN python -m pip install --no-cache-dir \
+    torch==2.3.1 \
+    torchvision==0.18.1 \
+    torchaudio==2.3.1 \
+    --index-url https://download.pytorch.org/whl/cu124
+
+RUN python -m pip install --no-cache-dir \
+    numpy \
+    pandas \
+    scikit-learn \
+    matplotlib \
+    jupyter \
+    transformers \
+    datasets \
+    accelerate \
+    safetensors
+
+WORKDIR /workspace
+
+VOLUME ["/workspace", "/models"]
+
+EXPOSE 8888
+
+CMD ["python"]
+
+
+================================================================================
+FILE: 00-setup-and-tooling\07-docker-for-ai\code\docker-compose.yml
+================================================================================
+
+services:
+  ai-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - ../../../:/workspace
+      - ~/models:/models
+      - ~/datasets:/data
+    ports:
+      - "8888:8888"
+    stdin_open: true
+    tty: true
+    command: jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.5
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+volumes:
+  qdrant_data:
+
+
+================================================================================
+FILE: 00-setup-and-tooling\07-docker-for-ai\docs\en.md
+================================================================================
+
+# Docker for AI
+
+> Containers make "works on my machine" a thing of the past.
+
+**Type:** Build
+**Languages:** Docker
+**Prerequisites:** Phase 0, Lessons 01 and 03
+**Time:** ~60 minutes
+
+## Learning Objectives
+
+- Build a GPU-enabled Docker image with CUDA, PyTorch, and AI libraries from a Dockerfile
+- Mount host directories as volumes to persist models, datasets, and code across container rebuilds
+- Configure the NVIDIA Container Toolkit to expose GPUs inside containers
+- Orchestrate multi-service AI applications (inference server + vector database) using Docker Compose
+
+## The Problem
+
+You trained a model on your laptop with PyTorch 2.3, CUDA 12.4, and Python 3.12. Your colleague has PyTorch 2.1, CUDA 11.8, and Python 3.10. Your model crashes on their machine. Your Dockerfile works on both.
+
+AI projects are dependency nightmares. A typical stack includes Python, PyTorch, CUDA drivers, cuDNN, system-level C libraries, and specialized packages like flash-attn that need exact compiler versions. Docker packages all of this into a single image that runs identically everywhere.
+
+## The Concept
+
+Docker wraps your code, runtime, libraries, and system tools into an isolated unit called a container. Think of it as a lightweight virtual machine, except it shares the host OS kernel instead of running its own, so it starts in seconds instead of minutes.
+
+```mermaid
+graph TD
+    subgraph without["Without Docker"]
+        A1["Your machine<br/>Python 3.12<br/>CUDA 12.4<br/>PyTorch 2.3"] -->|crashes| X1["???"]
+        A2["Their machine<br/>Python 3.10<br/>CUDA 11.8<br/>PyTorch 2.1"] -->|crashes| X2["???"]
+        A3["Server<br/>Python 3.11<br/>CUDA 12.1<br/>PyTorch 2.2"] -->|crashes| X3["???"]
+    end
+
+    subgraph with_docker["With Docker — Same image everywhere"]
+        B1["Your machine<br/>Python 3.12 | CUDA 12.4<br/>PyTorch 2.3 | Your code"]
+        B2["Their machine<br/>Python 3.12 | CUDA 12.4<br/>PyTorch 2.3 | Your code"]
+        B3["Server<br/>Python 3.12 | CUDA 12.4<br/>PyTorch 2.3 | Your code"]
+    end
+```
+
+### Why AI projects need Docker more than most
+
+1. **GPU drivers are fragile.** CUDA 12.4 code does not run on CUDA 11.8. Docker isolates the CUDA toolkit inside the container while sharing the host GPU driver through the NVIDIA Container Toolkit.
+
+2. **Model weights are large.** A 7B parameter model is 14 GB in fp16. You do not want to re-download it every time you rebuild. Docker volumes let you mount a models directory from the host.
+
+3. **Multi-service architectures are common.** A real AI application is not just a Python script. It is an inference server, a vector database for RAG, maybe a web frontend. Docker Compose orchestrates all of these with one command.
+
+### Key vocabulary
+
+| Term | What it means |
+|------|---------------|
+| Image | A read-only template. Your recipe. Built from a Dockerfile. |
+| Container | A running instance of an image. Your kitchen. |
+| Dockerfile | Instructions to build an image. Layer by layer. |
+| Volume | Persistent storage that survives container restarts. |
+| docker-compose | A tool for defining multi-container applications in YAML. |
+
+### Common container patterns in AI
+
+```
+Dev Container
+  Full toolkit. Editor support. Jupyter. Debugging tools.
+  Used during development and experimentation.
+
+Training Container
+  Minimal. Just the training script and dependencies.
+  Runs on GPU clusters. No editor, no Jupyter.
+
+Inference Container
+  Optimized for serving. Small image. Fast cold start.
+  Runs behind a load balancer in production.
+```
+
+## Build It
+
+### Step 1: Install Docker
+
+```bash
+# macOS
+brew install --cask docker
+open /Applications/Docker.app
+
+# Ubuntu
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+# Log out and back in for group change to take effect
+```
+
+Verify:
+
+```bash
+docker --version
+docker run hello-world
+```
+
+### Step 2: Install NVIDIA Container Toolkit (Linux with NVIDIA GPU)
+
+This lets Docker containers access your GPU. macOS and Windows (WSL2) users can skip this; Docker Desktop handles GPU passthrough differently on those platforms.
+
+```bash
+distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+curl -s -L https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-container.list | \
+    sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
+    sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+
+sudo apt-get update
+sudo apt-get install -y nvidia-container-toolkit
+sudo nvidia-ctk runtime configure --runtime=docker
+sudo systemctl restart docker
+```
+
+Test GPU access inside a container:
+
+```bash
+docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi
+```
+
+If you see your GPU info, the toolkit is working.
+
+### Step 3: Understand base images
+
+Choosing the right base image saves hours of debugging.
+
+```
+nvidia/cuda:12.4.1-devel-ubuntu22.04
+  Full CUDA toolkit. Compilers included.
+  Use for: building packages that need nvcc (flash-attn, bitsandbytes)
+  Size: ~4 GB
+
+nvidia/cuda:12.4.1-runtime-ubuntu22.04
+  CUDA runtime only. No compilers.
+  Use for: running pre-built code
+  Size: ~1.5 GB
+
+pytorch/pytorch:2.3.1-cuda12.4-cudnn9-runtime
+  PyTorch pre-installed on top of CUDA.
+  Use for: skipping the PyTorch install step
+  Size: ~6 GB
+
+python:3.12-slim
+  No CUDA. CPU only.
+  Use for: inference on CPU, lightweight tools
+  Size: ~150 MB
+```
+
+### Step 4: Write a Dockerfile for AI development
+
+Here is the Dockerfile in `code/Dockerfile`. Walk through it:
+
+```dockerfile
+FROM nvidia/cuda:12.4.1-devel-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.12 \
+    python3.12-venv \
+    python3.12-dev \
+    python3-pip \
+    git \
+    curl \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1
+
+RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel
+
+RUN python -m pip install --no-cache-dir \
+    torch==2.3.1 \
+    torchvision==0.18.1 \
+    torchaudio==2.3.1 \
+    --index-url https://download.pytorch.org/whl/cu124
+
+RUN python -m pip install --no-cache-dir \
+    numpy \
+    pandas \
+    scikit-learn \
+    matplotlib \
+    jupyter \
+    transformers \
+    datasets \
+    accelerate \
+    safetensors
+
+WORKDIR /workspace
+
+VOLUME ["/workspace", "/models"]
+
+EXPOSE 8888
+
+CMD ["python"]
+```
+
+Build it:
+
+```bash
+docker build -t ai-dev -f phases/00-setup-and-tooling/07-docker-for-ai/code/Dockerfile .
+```
+
+This takes a while the first time (downloading CUDA base image + PyTorch). Subsequent builds use cached layers.
+
+Run it:
+
+```bash
+docker run --rm -it --gpus all \
+    -v $(pwd):/workspace \
+    -v ~/models:/models \
+    ai-dev python -c "import torch; print(f'PyTorch {torch.__version__}, CUDA: {torch.cuda.is_available()}')"
+```
+
+Run Jupyter inside the container:
+
+```bash
+docker run --rm -it --gpus all \
+    -v $(pwd):/workspace \
+    -v ~/models:/models \
+    -p 8888:8888 \
+    ai-dev jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root
+```
+
+### Step 5: Volume mounts for data and models
+
+Volume mounts are critical for AI work. Without them, your 14 GB model downloads vanish when the container stops.
+
+```bash
+# Mount your code
+-v $(pwd):/workspace
+
+# Mount a shared models directory
+-v ~/models:/models
+
+# Mount datasets
+-v ~/datasets:/data
+```
+
+Inside your training script, load from the mounted path:
+
+```python
+from transformers import AutoModel
+
+model = AutoModel.from_pretrained("/models/llama-7b")
+```
+
+The model lives on your host filesystem. Rebuild the container as often as you want without re-downloading.
+
+### Step 6: Docker Compose for multi-service AI apps
+
+A real RAG application needs an inference server and a vector database. Docker Compose runs both with one command.
+
+See `code/docker-compose.yml`:
+
+```yaml
+services:
+  ai-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - ../../../:/workspace
+      - ~/models:/models
+      - ~/datasets:/data
+    ports:
+      - "8888:8888"
+    stdin_open: true
+    tty: true
+    command: jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.5
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+volumes:
+  qdrant_data:
+```
+
+Start everything:
+
+```bash
+cd phases/00-setup-and-tooling/07-docker-for-ai/code
+docker compose up -d
+```
+
+Now your AI dev container can reach the vector database at `http://qdrant:6333` by service name. Docker Compose creates a shared network automatically.
+
+Test the connection from inside the AI container:
+
+```python
+from qdrant_client import QdrantClient
+
+client = QdrantClient(host="qdrant", port=6333)
+print(client.get_collections())
+```
+
+Stop everything:
+
+```bash
+docker compose down
+```
+
+Add `-v` to also delete the qdrant volume:
+
+```bash
+docker compose down -v
+```
+
+### Step 7: Useful Docker commands for AI work
+
+```bash
+# List running containers
+docker ps
+
+# List all images and their sizes
+docker images
+
+# Remove unused images (reclaim disk space)
+docker system prune -a
+
+# Check GPU usage inside a running container
+docker exec -it <container_id> nvidia-smi
+
+# Copy a file from container to host
+docker cp <container_id>:/workspace/results.csv ./results.csv
+
+# View container logs
+docker logs -f <container_id>
+```
+
+## Use It
+
+You now have a reproducible AI development environment. For the rest of this course:
+
+- Use `docker compose up` to start your dev environment and vector database together
+- Mount your code, models, and data as volumes so nothing is lost between rebuilds
+- When a lesson requires a new Python package, add it to the Dockerfile and rebuild
+- Share your Dockerfile with teammates. They get the exact same environment.
+
+### No GPU?
+
+Remove the `--gpus all` flag and the NVIDIA deploy block. The container still works for CPU-based lessons. PyTorch detects the absence of CUDA and falls back to CPU automatically.
+
+## Exercises
+
+1. Build the Dockerfile and run `python -c "import torch; print(torch.__version__)"` inside the container
+2. Start the docker-compose stack and verify Qdrant is accessible from the AI container at `http://qdrant:6333/collections`
+3. Add `flask` to the Dockerfile, rebuild, and run a simple API server on port 5000. Map the port with `-p 5000:5000`
+4. Measure the image size with `docker images`. Try switching the base image from `devel` to `runtime` and compare sizes
+
+## Key Terms
+
+| Term | What people say | What it actually means |
+|------|----------------|----------------------|
+| Container | "Lightweight VM" | An isolated process using the host kernel, with its own filesystem and network |
+| Image layer | "Cached step" | Each Dockerfile instruction creates a layer. Unchanged layers are cached, so rebuilds are fast. |
+| NVIDIA Container Toolkit | "GPU in Docker" | A runtime hook that exposes host GPUs to containers via `--gpus` flag |
+| Volume mount | "Shared folder" | A directory on the host mapped into the container. Changes persist after the container stops. |
+| Base image | "Starting point" | The `FROM` image your Dockerfile builds on top of. Determines what is pre-installed. |
+
+
+================================================================================
+FILE: 00-setup-and-tooling\08-editor-setup\quiz.json
+================================================================================
+
+{
+  "questions": [
+    {
+      "stage": "pre",
+      "question": "What is a Language Server Protocol (LSP)?",
+      "options": ["A protocol for transferring files between editors", "A standard for editors to receive type info, completions, and diagnostics from a language-specific server", "A compression format for source code files", "A network protocol for remote pair programming"],
+      "correct": 1,
+      "explanation": "LSP is a standardized protocol that lets editors communicate with language servers for features like autocomplete, type checking, and error diagnostics, regardless of the editor used."
+    },
+    {
+      "stage": "pre",
+      "question": "Why is format-on-save useful for team projects?",
+      "options": ["It reduces file sizes by removing whitespace", "It ensures consistent code style across all contributors without manual formatting", "It catches runtime bugs before the code is executed", "It compresses the code for faster git operations"],
+      "correct": 1,
+      "explanation": "Format-on-save runs a formatter (like Black or Ruff) every time you save, ensuring all code follows the same style conventions regardless of who wrote it."
+    },
+    {
+      "stage": "post",
+      "question": "Which VS Code extension enables editing code on a remote GPU machine as if it were local?",
+      "options": ["GitLens", "Pylance", "Remote SSH", "Debugpy"],
+      "correct": 2,
+      "explanation": "Remote SSH installs a lightweight VS Code server on the remote machine and streams the UI to your local editor, letting you edit files, run terminals, and debug remotely."
+    },
+    {
+      "stage": "post",
+      "question": "Why should 'notebook.output.scrolling' be enabled in VS Code settings for AI work?",
+      "options": ["It enables horizontal scrolling for wide dataframes", "It prevents training loop output (thousands of lines) from exploding the output panel", "It allows scrolling between notebook cells with the mouse wheel", "It enables smooth scrolling animations in the editor"],
+      "correct": 1,
+      "explanation": "Training loops can print thousands of lines of output. Without output scrolling, the notebook output panel grows unbounded, making the notebook unusable."
+    },
+    {
+      "stage": "post",
+      "question": "What does setting 'python.analysis.typeCheckingMode' to 'basic' in VS Code accomplish?",
+      "options": ["It enables syntax highlighting for Python files", "It catches wrong argument types and tensor shape mismatches before running the code", "It formats Python code according to PEP 8 standards", "It enables Python 3.12 language features"],
+      "correct": 1,
+      "explanation": "Basic type checking with Pylance flags type mismatches, wrong argument types, and incorrect API parameters at edit time, catching bugs before you run a potentially expensive training script."
+    }
+  ]
+}
+
+
+================================================================================
+FILE: 00-setup-and-tooling\08-editor-setup\code\vscode\extensions.json
+================================================================================
+
+{
+    "recommendations": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-toolsai.jupyter",
+        "ms-python.debugpy",
+        "ms-python.black-formatter",
+        "charliermarsh.ruff",
+        "eamodio.gitlens",
+        "ms-vscode-remote.remote-ssh",
+        "ms-vscode-remote.remote-containers",
+        "ms-toolsai.vscode-jupyter-cell-tags",
+        "ms-toolsai.vscode-jupyter-slideshow",
+        "redhat.vscode-yaml",
+        "tamasfe.even-better-toml"
+    ]
+}
+
+
+================================================================================
+FILE: 00-setup-and-tooling\08-editor-setup\code\vscode\settings.json
+================================================================================
+
+{
+    "python.analysis.typeCheckingMode": "basic",
+    "python.analysis.autoImportCompletions": true,
+    "python.analysis.inlayHints.functionReturnTypes": true,
+    "python.analysis.inlayHints.variableTypes": false,
+
+    "[python]": {
+        "editor.defaultFormatter": "ms-python.black-formatter",
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+            "source.organizeImports": "explicit"
+        }
+    },
+
+    "black-formatter.args": ["--line-length", "88"],
+
+    "ruff.lint.run": "onSave",
+
+    "editor.rulers": [88, 120],
+    "editor.tabSize": 4,
+    "editor.insertSpaces": true,
+    "editor.renderWhitespace": "trailing",
+    "editor.bracketPairColorization.enabled": true,
+    "editor.stickyScroll.enabled": true,
+    "editor.minimap.enabled": false,
+
+    "files.autoSave": "afterDelay",
+    "files.autoSaveDelay": 1000,
+    "files.trimTrailingWhitespace": true,
+    "files.insertFinalNewline": true,
+    "files.exclude": {
+        "**/__pycache__": true,
+        "**/.ipynb_checkpoints": true,
+        "**/*.pyc": true,
+        "**/.pytest_cache": true,
+        "**/.mypy_cache": true,
+        "**/.ruff_cache": true
+    },
+
+    "notebook.output.scrolling": true,
+    "notebook.output.textLineLimit": 500,
+    "notebook.cellToolbarLocation": "right",
+
+    "terminal.integrated.scrollback": 10000,
+    "terminal.integrated.fontSize": 13,
+    "terminal.integrated.defaultProfile.osx": "zsh",
+    "terminal.integrated.defaultProfile.linux": "bash",
+
+    "git.autofetch": true,
+    "git.confirmSync": false,
+    "gitlens.codeLens.enabled": false,
+
+    "search.exclude": {
+        "**/.venv": true,
+        "**/node_modules": true,
+        "**/__pycache__": true,
+        "**/dist": true,
+        "**/*.egg-info": true
+    }
+}
+
+
+================================================================================
+FILE: 00-setup-and-tooling\08-editor-setup\docs\en.md
+================================================================================
+
+# Editor Setup
+
+> Your editor is your co-pilot. Configure it once so it stays out of your way and starts pulling its weight.
+
+**Type:** Build
+**Languages:** --
+**Prerequisites:** Phase 0, Lesson 01
+**Time:** ~20 minutes
+
+## Learning Objectives
+
+- Install VS Code with essential extensions for Python, Jupyter, linting, and remote SSH
+- Configure format-on-save, type checking, and notebook output scrolling for AI workflows
+- Set up Remote SSH to edit and debug code on remote GPU machines as if they were local
+- Evaluate editor alternatives (Cursor, Windsurf, Neovim) and their tradeoffs for AI work
+
+## The Problem
+
+You'll spend thousands of hours inside your editor writing Python, running notebooks, debugging training loops, and SSH-ing into GPU boxes. A misconfigured editor turns every session into friction: no autocomplete, no type hints, no inline errors, manual formatting, and a clunky terminal workflow.
+
+The right setup takes 20 minutes. Skipping it costs you 20 minutes every day.
+
+## The Concept
+
+An AI engineering editor setup needs five things:
+
+```mermaid
+graph TD
+    L5["5. Remote Development<br/>SSH into GPU boxes, cloud VMs"] --> L4
+    L4["4. Terminal Integration<br/>Run scripts, debug, monitor GPU"] --> L3
+    L3["3. AI-Specific Settings<br/>Auto-format, type checking, rulers"] --> L2
+    L2["2. Extensions<br/>Python, Jupyter, Pylance, GitLens"] --> L1
+    L1["1. Base Editor<br/>VS Code — free, extensible, universal"]
+```
+
+## Build It
+
+### Step 1: Install VS Code
+
+VS Code is the recommended editor. It is free, runs on every OS, has first-class Jupyter notebook support, and the extension ecosystem covers everything you need for AI work.
+
+Download it from [code.visualstudio.com](https://code.visualstudio.com/).
+
+Verify from the terminal:
+
+```bash
+code --version
+```
+
+If `code` is not found on macOS, open VS Code, press `Cmd+Shift+P`, type "Shell Command", and select "Install 'code' command in PATH".
+
+### Step 2: Install Essential Extensions
+
+Open the integrated terminal in VS Code (`Ctrl+`` ` or `` Cmd+` ``) and install the extensions that matter for AI work:
+
+```bash
+code --install-extension ms-python.python
+code --install-extension ms-python.vscode-pylance
+code --install-extension ms-toolsai.jupyter
+code --install-extension eamodio.gitlens
+code --install-extension ms-vscode-remote.remote-ssh
+code --install-extension ms-python.debugpy
+code --install-extension ms-python.black-formatter
+code --install-extension charliermarsh.ruff
+```
+
+What each one does:
+
+| Extension | Why |
+|-----------|-----|
+| Python | Language support, virtual env detection, run/debug |
+| Pylance | Fast type checking, autocomplete, import resolution |
+| Jupyter | Run notebooks inside VS Code, variable explorer |
+| GitLens | See who changed what, inline git blame |
+| Remote SSH | Open a folder on a remote GPU box as if it were local |
+| Debugpy | Step-through debugging for Python |
+| Black Formatter | Auto-format on save, consistent style |
+| Ruff | Fast linting, catches common mistakes |
+
+The file `code/.vscode/extensions.json` in this lesson contains the full recommendations list. When you open the project folder, VS Code will prompt you to install them.
+
+### Step 3: Configure Settings
+
+Copy the settings from `code/.vscode/settings.json` in this lesson, or apply them manually through `Settings > Open Settings (JSON)`.
+
+The key settings for AI work:
+
+```jsonc
+{
+    "python.analysis.typeCheckingMode": "basic",
+    "editor.formatOnSave": true,
+    "editor.rulers": [88, 120],
+    "notebook.output.scrolling": true,
+    "files.autoSave": "afterDelay"
+}
+```
+
+Why these matter:
+
+- **Type checking on basic**: Catches wrong argument types before you run. Saves debugging time on tensor shape mismatches and wrong API parameters.
+- **Format on save**: Never think about formatting again. Black handles it.
+- **Rulers at 88 and 120**: Black wraps at 88. The 120 marker shows when docstrings and comments are getting too long.
+- **Notebook output scrolling**: Training loops print thousands of lines. Without scrolling, the output panel explodes.
+- **Auto-save**: You will forget to save. Your training script will run stale code. Auto-save prevents that.
+
+### Step 4: Terminal Integration
+
+VS Code's integrated terminal is where you run training scripts, monitor GPUs, and manage environments.
+
+Set it up properly:
+
+```jsonc
+{
+    "terminal.integrated.defaultProfile.osx": "zsh",
+    "terminal.integrated.defaultProfile.linux": "bash",
+    "terminal.integrated.fontSize": 13,
+    "terminal.integrated.scrollback": 10000
+}
+```
+
+Useful shortcuts:
+
+| Action | macOS | Linux/Windows |
+|--------|-------|---------------|
+| Toggle terminal | `` Ctrl+` `` | `` Ctrl+` `` |
+| New terminal | `Ctrl+Shift+`` ` | `Ctrl+Shift+`` ` |
+| Split terminal | `Cmd+\` | `Ctrl+\` |
+
+Split terminals are useful: one for running your script, one for monitoring GPU with `nvidia-smi -l 1` or `watch -n 1 nvidia-smi`.
+
+### Step 5: Remote Development (SSH into GPU Boxes)
+
+This is the most important extension for AI work. You will run training on remote machines (cloud VMs, lab servers, Lambda, Vast.ai). Remote SSH lets you open the remote filesystem, edit files, run terminals, and debug as if everything were local.
+
+Setup:
+
+1. Install the Remote SSH extension (done in Step 2).
+2. Press `Ctrl+Shift+P` (or `Cmd+Shift+P`), type "Remote-SSH: Connect to Host".
+3. Enter `user@your-gpu-box-ip`.
+4. VS Code installs its server component on the remote machine automatically.
+
+For passwordless access, set up SSH keys:
+
+```bash
+ssh-keygen -t ed25519 -C "your-email@example.com"
+ssh-copy-id user@your-gpu-box-ip
+```
+
+Add the host to `~/.ssh/config` for convenience:
+
+```
+Host gpu-box
+    HostName 203.0.113.50
+    User ubuntu
+    IdentityFile ~/.ssh/id_ed25519
+    ForwardAgent yes
+```
+
+Now `Remote-SSH: Connect to Host > gpu-box` connects instantly.
+
+## Alternatives
+
+### Cursor
+
+[cursor.com](https://cursor.com) is a VS Code fork with built-in AI code generation. It uses the same extension ecosystem and settings format. If you use Cursor, everything in this lesson still applies. Import the same `settings.json` and `extensions.json`.
+
+### Windsurf
+
+[windsurf.com](https://windsurf.com) is another AI-first VS Code fork. Same story: same extensions, same settings format, same Remote SSH support.
+
+### Vim/Neovim
+
+If you already use Vim or Neovim and are productive in it, stay there. The minimum setup for AI Python work:
+
+- **pyright** or **pylsp** for type checking (via Mason or manual install)
+- **nvim-lspconfig** for language server integration
+- **jupyter-vim** or **molten-nvim** for notebook-like execution
+- **telescope.nvim** for file/symbol search
+- **none-ls.nvim** with black and ruff for formatting/linting
+
+If you do not already use Vim, do not start now. The learning curve will compete with learning AI engineering. Use VS Code.
+
+## Use It
+
+With this setup, your daily workflow looks like:
+
+1. Open the project folder in VS Code (or connect via Remote SSH to a GPU box).
+2. Write Python in the editor with autocomplete, type hints, and inline errors.
+3. Run Jupyter notebooks inline with the Jupyter extension.
+4. Use the integrated terminal for training scripts, `uv pip install`, and GPU monitoring.
+5. Review changes with GitLens before committing.
+
+## Exercises
+
+1. Install VS Code and all extensions listed in Step 2
+2. Copy the `settings.json` from this lesson into your VS Code config
+3. Open a Python file and verify that Pylance shows type hints and Black formats on save
+4. If you have access to a remote machine, set up Remote SSH and open a folder on it
+
+## Key Terms
+
+| Term | What people say | What it actually means |
+|------|----------------|----------------------|
+| LSP | "Autocomplete engine" | Language Server Protocol: a standard for editors to get type info, completions, and diagnostics from a language-specific server |
+| Pylance | "The Python plugin" | Microsoft's Python language server using Pyright for type checking and IntelliSense |
+| Remote SSH | "Working on the server" | VS Code extension that runs a lightweight server on a remote machine and streams the UI to your local editor |
+| Format on save | "Auto-prettier" | The editor runs a formatter (Black, Ruff) every time you save, so code style is always consistent |
+
+
+================================================================================
+FILE: 00-setup-and-tooling\09-data-management\quiz.json
+================================================================================
+
+{
+  "questions": [
+    {
+      "stage": "pre",
+      "question": "Why is it important to have separate train, validation, and test splits in machine learning?",
+      "options": ["To make the dataset smaller so training is faster", "To evaluate model performance on unseen data and prevent overfitting", "To ensure each split uses a different file format", "To distribute data across multiple GPUs"],
+      "correct": 1,
+      "explanation": "The training set teaches the model, the validation set tunes hyperparameters during training, and the test set provides a final unbiased evaluation on data the model has never seen."
+    },
+    {
+      "stage": "pre",
+      "question": "What is the Hugging Face Hub primarily used for in AI/ML workflows?",
+      "options": ["Hosting and sharing datasets, models, and ML artifacts", "Running GPU training jobs in the cloud", "Managing Python virtual environments", "Version controlling source code like GitHub"],
+      "correct": 0,
+      "explanation": "Hugging Face Hub is a platform for hosting and sharing pre-trained models, datasets, and ML demos. The 'datasets' library provides a standard way to load data from it."
+    },
+    {
+      "stage": "post",
+      "question": "What advantage does the Parquet format have over CSV for storing ML datasets?",
+      "options": ["Parquet files are human-readable in any text editor", "Parquet uses columnar storage for smaller file sizes and faster read speeds", "Parquet supports more data types than CSV", "Parquet files can be edited in spreadsheet applications"],
+      "correct": 1,
+      "explanation": "Parquet is a columnar binary format that compresses better than CSV and enables fast column-level reads. It is the preferred storage format for ML datasets."
+    },
+    {
+      "stage": "post",
+      "question": "What does 'streaming=True' do when loading a dataset with the Hugging Face datasets library?",
+      "options": ["Downloads the dataset faster using parallel connections", "Loads data row by row without downloading the full dataset to disk", "Converts the dataset to a streaming video format", "Enables real-time updates as new data is added to the Hub"],
+      "correct": 1,
+      "explanation": "Streaming mode creates an IterableDataset that fetches rows on demand. Memory usage stays constant regardless of dataset size, which is essential for datasets too large to fit on disk."
+    },
+    {
+      "stage": "post",
+      "question": "When should you use DVC (Data Version Control) instead of just .gitignore for large files?",
+      "options": ["When your dataset is smaller than 1 MB", "When you need to reproduce exact experiments across machines with versioned data", "When you are working alone on a personal project", "When you only have CSV files in your project"],
+      "correct": 1,
+      "explanation": "DVC tracks data versions with small pointer files in git while storing the actual data in remote storage (S3, GCS). It ensures anyone can reproduce your exact experiment with the same data."
+    }
+  ]
+}
+
+
+================================================================================
+FILE: 00-setup-and-tooling\09-data-management\code\data_utils.py
+================================================================================
+
+import os
+import sys
+import json
+import hashlib
+from pathlib import Path
+
+try:
+    from datasets import load_dataset, Dataset
+except ImportError:
+    print("Install the datasets library: pip install datasets")
+    sys.exit(1)
+
+try:
+    from huggingface_hub import hf_hub_download
+except ImportError:
+    print("Install huggingface_hub: pip install huggingface_hub")
+    sys.exit(1)
+
+
+CACHE_DIR = Path.home() / ".cache" / "huggingface" / "datasets"
+
+
+def load_and_inspect(dataset_name: str, config: str = None, split: str = "train"):
+    kwargs = {"path": dataset_name}
+    if config:
+        kwargs["name"] = config
+    if split:
+        kwargs["split"] = split
+
+    ds = load_dataset(**kwargs)
+    print(f"Dataset: {dataset_name}")
+    print(f"  Split: {split}")
+    print(f"  Rows: {len(ds)}")
+    print(f"  Columns: {ds.column_names}")
+    print(f"  Features: {ds.features}")
+    print(f"  First row: {ds[0]}")
+    return ds
+
+
+def stream_dataset(dataset_name: str, config: str = None, max_rows: int = 5):
+    kwargs = {"path": dataset_name, "split": "train", "streaming": True}
+    if config:
+        kwargs["name"] = config
+
+    ds = load_dataset(**kwargs)
+    rows = []
+    for i, example in enumerate(ds):
+        rows.append(example)
+        if i >= max_rows - 1:
+            break
+
+    print(f"Streamed {len(rows)} rows from {dataset_name}")
+    return rows
+
+
+def convert_format(ds, output_dir: str, name: str):
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    csv_path = output_path / f"{name}.csv"
+    json_path = output_path / f"{name}.json"
+    parquet_path = output_path / f"{name}.parquet"
+
+    ds.to_csv(str(csv_path))
+    ds.to_json(str(json_path))
+    ds.to_parquet(str(parquet_path))
+
+    csv_size = csv_path.stat().st_size
+    json_size = json_path.stat().st_size
+    parquet_size = parquet_path.stat().st_size
+
+    print(f"Format comparison for {name}:")
+    print(f"  CSV:     {csv_size:>10,} bytes")
+    print(f"  JSON:    {json_size:>10,} bytes")
+    print(f"  Parquet: {parquet_size:>10,} bytes")
+    print(f"  Parquet is {csv_size / parquet_size:.1f}x smaller than CSV")
+
+    return {"csv": csv_path, "json": json_path, "parquet": parquet_path}
+
+
+def make_splits(ds, train_ratio: float = 0.8, val_ratio: float = 0.1, seed: int = 42):
+    test_ratio = 1.0 - train_ratio - val_ratio
+    assert test_ratio > 0, "train_ratio + val_ratio must be less than 1.0"
+
+    test_size = val_ratio + test_ratio
+    split1 = ds.train_test_split(test_size=test_size, seed=seed)
+    train_ds = split1["train"]
+
+    val_fraction = val_ratio / test_size
+    split2 = split1["test"].train_test_split(test_size=(1.0 - val_fraction), seed=seed)
+    val_ds = split2["train"]
+    test_ds = split2["test"]
+
+    total = len(train_ds) + len(val_ds) + len(test_ds)
+    print(f"Splits (seed={seed}):")
+    print(f"  Train: {len(train_ds):>6} ({len(train_ds)/total:.1%})")
+    print(f"  Val:   {len(val_ds):>6} ({len(val_ds)/total:.1%})")
+    print(f"  Test:  {len(test_ds):>6} ({len(test_ds)/total:.1%})")
+
+    return {"train": train_ds, "val": val_ds, "test": test_ds}
+
+
+def download_model_file(repo_id: str, filename: str):
+    path = hf_hub_download(repo_id=repo_id, filename=filename)
+    size = Path(path).stat().st_size
+    print(f"Downloaded {filename} from {repo_id}")
+    print(f"  Path: {path}")
+    print(f"  Size: {size:,} bytes")
+    return path
+
+
+def cache_summary():
+    cache_path = CACHE_DIR
+    if not cache_path.exists():
+        print("No HF cache found yet.")
+        return
+
+    total_size = 0
+    file_count = 0
+    for f in cache_path.rglob("*"):
+        if f.is_file():
+            total_size += f.stat().st_size
+            file_count += 1
+
+    print(f"HF Dataset Cache: {cache_path}")
+    print(f"  Files: {file_count}")
+    print(f"  Total size: {total_size / (1024 * 1024):.1f} MB")
+
+
+def load_from_parquet(path: str):
+    ds = Dataset.from_parquet(path)
+    print(f"Loaded {len(ds)} rows from {path}")
+    return ds
+
+
+def load_from_csv(path: str):
+    ds = Dataset.from_csv(path)
+    print(f"Loaded {len(ds)} rows from {path}")
+    return ds
+
+
+def load_from_json(path: str):
+    ds = Dataset.from_json(path)
+    print(f"Loaded {len(ds)} rows from {path}")
+    return ds
+
+
+def fingerprint(ds, num_rows: int = 100):
+    sample = ds.select(range(min(num_rows, len(ds))))
+    content = json.dumps([row for row in sample], default=str).encode()
+    digest = hashlib.sha256(content).hexdigest()[:16]
+    print(f"Dataset fingerprint (first {num_rows} rows): {digest}")
+    return digest
+
+
+if __name__ == "__main__":
+    print("=" * 60)
+    print("Data Management Utility")
+    print("=" * 60)
+
+    print("\n--- 1. Load and inspect a dataset ---")
+    ds = load_and_inspect("rotten_tomatoes", split="train")
+
+    print("\n--- 2. Stream a dataset ---")
+    rows = stream_dataset("rotten_tomatoes", max_rows=3)
+    for row in rows:
+        print(f"  {row['text'][:80]}...")
+
+    print("\n--- 3. Convert formats ---")
+    small_ds = ds.select(range(500))
+    paths = convert_format(small_ds, "/tmp/data_utils_demo", "rotten_tomatoes_sample")
+
+    print("\n--- 4. Create train/val/test splits ---")
+    splits = make_splits(small_ds, train_ratio=0.8, val_ratio=0.1, seed=42)
+
+    print("\n--- 5. Reload from Parquet ---")
+    reloaded = load_from_parquet(str(paths["parquet"]))
+    print(f"  Columns: {reloaded.column_names}")
+
+    print("\n--- 6. Download a model file ---")
+    download_model_file("sentence-transformers/all-MiniLM-L6-v2", "config.json")
+
+    print("\n--- 7. Dataset fingerprint ---")
+    fingerprint(ds)
+
+    print("\n--- 8. Cache summary ---")
+    cache_summary()
+
+    print("\n" + "=" * 60)
+    print("All checks passed. Your data pipeline is ready.")
+    print("=" * 60)
+
+
+================================================================================
+FILE: 00-setup-and-tooling\09-data-management\docs\en.md
+================================================================================
+
+# Data Management
+
+> Data is the fuel. How you manage it determines how fast you go.
+
+**Type:** Build
+**Language:** Python
+**Prerequisites:** Phase 0, Lesson 01
+**Time:** ~45 minutes
+
+## Learning Objectives
+
+- Load, stream, and cache datasets using the Hugging Face `datasets` library
+- Convert between CSV, JSON, Parquet, and Arrow formats and explain their tradeoffs
+- Create reproducible train/validation/test splits with fixed random seeds
+- Manage large model and dataset files using `.gitignore`, Git LFS, or DVC
+
+## The Problem
+
+Every AI project starts with data. You need to find datasets, download them, convert between formats, split them for training and evaluation, and version them so experiments are reproducible. Doing this manually every time is slow and error-prone. You need a repeatable workflow.
+
+## The Concept
+
+```mermaid
+graph TD
+    A["Hugging Face Hub"] --> B["datasets library"]
+    B --> C["Load / Stream"]
+    C --> D["Local Cache<br/>~/.cache/huggingface/"]
+    B --> E["Format Conversion<br/>CSV, JSON, Parquet, Arrow"]
+    E --> F["Data Splits<br/>train / val / test"]
+    F --> G["Your Training Pipeline"]
+```
+
+The Hugging Face `datasets` library is the standard way to load data for AI work. It handles downloading, caching, format conversion, and streaming out of the box.
+
+## Build It
+
+### Step 1: Install the datasets library
+
+```bash
+pip install datasets huggingface_hub
+```
+
+### Step 2: Load a dataset
+
+```python
+from datasets import load_dataset
+
+dataset = load_dataset("imdb")
+print(dataset)
+print(dataset["train"][0])
+```
+
+This downloads the IMDB movie review dataset. After the first download, it loads from cache at `~/.cache/huggingface/datasets/`.
+
+### Step 3: Stream large datasets
+
+Some datasets are too large to fit on disk. Streaming loads them row by row without downloading the full thing.
+
+```python
+dataset = load_dataset("wikimedia/wikipedia", "20220301.en", split="train", streaming=True)
+
+for i, example in enumerate(dataset):
+    print(example["title"])
+    if i >= 4:
+        break
+```
+
+Streaming gives you an `IterableDataset`. You process rows as they arrive. Memory usage stays constant regardless of dataset size.
+
+### Step 4: Dataset formats
+
+The `datasets` library uses Apache Arrow under the hood. You can convert to other formats depending on what your pipeline needs.
+
+```python
+dataset = load_dataset("imdb", split="train")
+
+dataset.to_csv("imdb_train.csv")
+dataset.to_json("imdb_train.json")
+dataset.to_parquet("imdb_train.parquet")
+```
+
+Format comparison:
+
+| Format | Size | Read Speed | Best For |
+|--------|------|-----------|----------|
+| CSV | Large | Slow | Human readability, spreadsheets |
+| JSON | Large | Slow | APIs, nested data |
+| Parquet | Small | Fast | Analytics, columnar queries |
+| Arrow | Small | Fastest | In-memory processing (what `datasets` uses internally) |
+
+For AI work, Parquet is the best storage format. Arrow is what you work with in memory. CSV and JSON are for interchange.
+
+### Step 5: Data splits
+
+Every ML project needs three splits:
+
+- **Train**: The model learns from this (typically 80%)
+- **Validation**: You check progress during training (typically 10%)
+- **Test**: Final evaluation after training is done (typically 10%)
+
+Some datasets come pre-split. When they don't, split them yourself:
+
+```python
+dataset = load_dataset("imdb", split="train")
+
+split = dataset.train_test_split(test_size=0.2, seed=42)
+train_val = split["train"].train_test_split(test_size=0.125, seed=42)
+
+train_ds = train_val["train"]
+val_ds = train_val["test"]
+test_ds = split["test"]
+
+print(f"Train: {len(train_ds)}, Val: {len(val_ds)}, Test: {len(test_ds)}")
+```
+
+Always set a seed for reproducibility. The same seed produces the same split every time.
+
+### Step 6: Download and cache models
+
+Models are large files. The `huggingface_hub` library handles downloading and caching.
+
+```python
+from huggingface_hub import hf_hub_download, snapshot_download
+
+model_path = hf_hub_download(
+    repo_id="sentence-transformers/all-MiniLM-L6-v2",
+    filename="config.json"
+)
+print(f"Cached at: {model_path}")
+
+model_dir = snapshot_download("sentence-transformers/all-MiniLM-L6-v2")
+print(f"Full model at: {model_dir}")
+```
+
+Models cache to `~/.cache/huggingface/hub/`. Once downloaded, they load instantly on subsequent runs.
+
+### Step 7: Handle large files
+
+Model weights and large datasets should not go into git. Three options:
+
+**Option A: .gitignore (simplest)**
+
+```
+*.bin
+*.safetensors
+*.pt
+*.onnx
+data/*.parquet
+data/*.csv
+models/
+```
+
+**Option B: Git LFS (track large files in git)**
+
+```bash
+git lfs install
+git lfs track "*.bin"
+git lfs track "*.safetensors"
+git add .gitattributes
+```
+
+Git LFS stores pointers in your repo and the actual files on a separate server. GitHub gives you 1 GB free.
+
+**Option C: DVC (data version control)**
+
+```bash
+pip install dvc
+dvc init
+dvc add data/training_set.parquet
+git add data/training_set.parquet.dvc data/.gitignore
+git commit -m "Track training data with DVC"
+```
+
+DVC creates small `.dvc` files that point to your data. The data itself lives in S3, GCS, or another remote storage backend.
+
+| Approach | Complexity | Best For |
+|----------|-----------|----------|
+| .gitignore | Low | Personal projects, downloaded data you can re-fetch |
+| Git LFS | Medium | Teams sharing model weights via git |
+| DVC | High | Reproducible experiments, large datasets, teams |
+
+For this course, `.gitignore` is enough. Use DVC when you need to reproduce exact experiments across machines.
+
+### Step 8: Storage patterns
+
+**Local storage** works for datasets under ~10 GB. The HF cache handles this automatically.
+
+**Cloud storage** is for anything larger or shared across machines:
+
+```python
+import os
+
+local_path = os.path.expanduser("~/.cache/huggingface/datasets/")
+
+# s3_path = "s3://my-bucket/datasets/"
+# gcs_path = "gs://my-bucket/datasets/"
+```
+
+DVC integrates with S3 and GCS directly:
+
+```bash
+dvc remote add -d myremote s3://my-bucket/dvc-store
+dvc push
+```
+
+For this course, local storage is sufficient. Cloud storage becomes relevant when you fine-tune on remote GPU instances.
+
+## Datasets Used in This Course
+
+| Dataset | Lessons | Size | What It Teaches |
+|---------|---------|------|----------------|
+| IMDB | Tokenization, classification | 84 MB | Text classification basics |
+| WikiText | Language modeling | 181 MB | Next-token prediction |
+| SQuAD | QA systems | 35 MB | Question answering, spans |
+| Common Crawl (subset) | Embeddings | Varies | Large-scale text processing |
+| MNIST | Vision basics | 21 MB | Image classification fundamentals |
+| COCO (subset) | Multimodal | Varies | Image-text pairs |
+
+You do not need to download all of these now. Each lesson specifies what it needs.
+
+## Use It
+
+Run the utility script to verify everything works:
+
+```bash
+python code/data_utils.py
+```
+
+This downloads a small dataset, converts it, splits it, and prints a summary.
+
+## Ship It
+
+This lesson produces:
+- `code/data_utils.py` - reusable data loading and caching utility
+- `outputs/prompt-data-helper.md` - prompt for finding the right dataset for a task
+
+## Exercises
+
+1. Load the `glue` dataset with the `mrpc` config and inspect the first 5 examples
+2. Stream the `c4` dataset and count how many examples you can process in 10 seconds
+3. Convert a dataset to Parquet and compare the file size to CSV
+4. Create a 70/15/15 train/val/test split with a fixed seed and verify the sizes
+
+## Key Terms
+
+| Term | What people say | What it actually means |
+|------|----------------|----------------------|
+| Dataset split | "Training data" | A named subset (train/val/test) used at different stages of the ML lifecycle |
+| Streaming | "Load it lazily" | Processing data row by row from a remote source without downloading the full dataset |
+| Parquet | "Compressed CSV" | A columnar file format optimized for analytical queries and storage efficiency |
+| Arrow | "Fast dataframe" | An in-memory columnar format used internally by the datasets library for zero-copy reads |
+| Git LFS | "Git for big files" | An extension that stores large files outside the git repo while keeping pointers in version control |
+| DVC | "Git for data" | A version control system for datasets and models that integrates with cloud storage |
+| Cache | "Already downloaded" | A local copy of previously fetched data, stored at ~/.cache/huggingface/ by default |
+
+
+================================================================================
+FILE: 00-setup-and-tooling\09-data-management\outputs\prompt-data-helper.md
+================================================================================
+
+---
+name: prompt-data-helper
+description: Find and load the right dataset for an AI/ML task
+phase: 0
+lesson: 9
+---
+
+You help people find and load the right dataset for their AI/ML task. When someone describes what they want to build, you recommend specific datasets and show how to load them.
+
+Follow this process:
+
+1. **Clarify the task.** Determine the task type: classification, generation, question answering, summarization, translation, embeddings, image recognition, or multimodal.
+
+2. **Recommend datasets.** For each recommendation, provide:
+   - The Hugging Face dataset ID (e.g., `imdb`, `squad`, `glue/mrpc`)
+   - Dataset size and number of examples
+   - What the columns/features contain
+   - Why it fits the task
+
+3. **Show the loading code.** Provide a working Python snippet using the `datasets` library:
+   ```python
+   from datasets import load_dataset
+   ds = load_dataset("dataset_name", split="train")
+   ```
+
+4. **Handle special cases:**
+   - If the dataset is large (>5 GB), show the streaming approach
+   - If it needs a config name, include it: `load_dataset("glue", "mrpc")`
+   - If it requires authentication, mention `huggingface-cli login`
+   - If no public dataset exists, suggest how to structure a custom dataset
+
+Common task-to-dataset mapping:
+
+| Task | Starter Dataset | HF ID |
+|------|----------------|-------|
+| Text classification | Rotten Tomatoes | `rotten_tomatoes` |
+| Sentiment analysis | IMDB | `imdb` |
+| Natural language inference | MNLI | `glue/mnli` |
+| Question answering | SQuAD | `squad` |
+| Summarization | CNN/DailyMail | `cnn_dailymail` |
+| Translation | WMT | `wmt16` |
+| Language modeling | WikiText | `wikitext` |
+| Token classification | CoNLL-2003 | `conll2003` |
+| Image classification | MNIST / CIFAR-10 | `mnist` / `cifar10` |
+| Object detection | COCO | `detection-datasets/coco` |
+
+When recommending, prefer smaller datasets for learning and prototyping. Suggest larger datasets only when the user is ready to train at scale.
+
+Always verify the dataset exists on the Hugging Face Hub before recommending it. If you are unsure about a dataset ID, say so and suggest searching https://huggingface.co/datasets.
+
+
+================================================================================
+FILE: 00-setup-and-tooling\10-terminal-and-shell\quiz.json
+================================================================================
+
+{
+  "questions": [
+    {
+      "stage": "pre",
+      "question": "What does the pipe operator '|' do in a shell command?",
+      "options": ["Runs two commands in parallel", "Sends the standard output of one command as standard input to the next", "Saves the output of a command to a file", "Combines two files into one"],
+      "correct": 1,
+      "explanation": "The pipe operator connects commands in a pipeline. For example, 'cat log.txt | grep error' sends the contents of log.txt as input to grep, which filters for lines containing 'error'."
+    },
+    {
+      "stage": "pre",
+      "question": "What happens to a running process when you close the terminal that started it?",
+      "options": ["The process continues running in the background", "The process receives a hangup signal (SIGHUP) and typically terminates", "The process pauses until you open a new terminal", "The process automatically migrates to a system service"],
+      "correct": 1,
+      "explanation": "Closing the terminal sends SIGHUP to child processes, which causes them to terminate by default. Tools like tmux, nohup, or screen prevent this."
+    },
+    {
+      "stage": "post",
+      "question": "What is the key advantage of tmux over using 'nohup command &' for long-running training jobs?",
+      "options": ["tmux uses less CPU than nohup", "tmux lets you detach, reattach, and see live output with multiple panes", "tmux automatically restarts failed processes", "tmux compresses the process output to save disk space"],
+      "correct": 1,
+      "explanation": "tmux creates persistent sessions you can detach from and reattach to later, with live output visible in multiple panes. nohup only logs to a file with no way to interact or reattach."
+    },
+    {
+      "stage": "post",
+      "question": "What does 'python train.py > output.log 2>&1' accomplish?",
+      "options": ["Runs train.py and saves only errors to output.log", "Runs train.py and redirects both standard output and standard error to output.log", "Runs train.py twice and logs the second run", "Runs train.py with double the memory allocation"],
+      "correct": 1,
+      "explanation": "'> output.log' redirects stdout to the file. '2>&1' sends stderr to the same place as stdout. The result is both normal output and errors captured in one file."
+    },
+    {
+      "stage": "post",
+      "question": "Which command lets you access a remote Jupyter notebook running on port 8888 of a GPU box from your local browser?",
+      "options": ["scp -P 8888 user@gpu-box:~/notebook.ipynb", "ssh -L 8888:localhost:8888 user@gpu-box", "rsync -avz user@gpu-box:8888 localhost:8888", "ssh user@gpu-box --forward-port 8888"],
+      "correct": 1,
+      "explanation": "SSH local port forwarding (-L) maps a remote port to your local machine. After this command, opening localhost:8888 in your browser accesses the remote Jupyter server."
+    }
+  ]
+}
+
+
+================================================================================
+FILE: 00-setup-and-tooling\10-terminal-and-shell\docs\en.md
+================================================================================
+
+# Terminal & Shell
+
+> The terminal is where AI engineers live. Get comfortable here.
+
+**Type:** Learn
+**Languages:** --
+**Prerequisites:** Phase 0, Lesson 01
+**Time:** ~35 minutes
+
+## Learning Objectives
+
+- Use piping, redirects, and `grep` to filter and process training logs from the command line
+- Create persistent tmux sessions with multiple panes for concurrent training and GPU monitoring
+- Monitor system and GPU resources with `htop`, `nvtop`, and `nvidia-smi`
+- Transfer files between local and remote machines using SSH, `scp`, and `rsync`
+
+## The Problem
+
+You will spend more time in the terminal than in any editor. Training runs, GPU monitoring, log tailing, remote SSH sessions, environment management. Every AI workflow touches the shell. If you're slow here, you're slow everywhere.
+
+This lesson covers the terminal skills that matter for AI work. No history of Unix. No deep-dive into Bash scripting. Just what you need.
+
+## The Concept
+
+```mermaid
+graph TD
+    subgraph tmux["tmux session: training"]
+        subgraph top["Top row"]
+            P1["Pane 1: Training run<br/>python train.py<br/>Epoch 12/100 ..."]
+            P2["Pane 2: GPU monitor<br/>watch -n1 nvidia-smi<br/>GPU: 78% | Mem: 14/24G"]
+        end
+        P3["Pane 3: Logs + experiments<br/>tail -f logs/train.log | grep loss"]
+    end
+```
+
+Three things running at once. One terminal. You can detach, go home, SSH back in, and reattach. The training keeps running.
+
+## Build It
+
+### Step 1: Know your shell
+
+Check which shell you're running:
+
+```bash
+echo $SHELL
+```
+
+Most systems use `bash` or `zsh`. Both work fine. The commands in this course work in either.
+
+Key things to know:
+
+```bash
+# Move around
+cd ~/projects/ai-engineering-from-scratch
+pwd
+ls -la
+
+# History search (most useful shortcut you'll learn)
+# Ctrl+R then type part of a previous command
+# Press Ctrl+R again to cycle through matches
+
+# Clear terminal
+clear   # or Ctrl+L
+
+# Cancel a running command
+# Ctrl+C
+
+# Suspend a running command (resume with fg)
+# Ctrl+Z
+```
+
+### Step 2: Piping and redirects
+
+Piping connects commands together. This is how you process logs, filter output, and chain tools. You will use this constantly.
+
+```bash
+# Count how many times "loss" appears in a log
+cat train.log | grep "loss" | wc -l
+
+# Extract just the loss values from training output
+grep "loss:" train.log | awk '{print $NF}' > losses.txt
+
+# Watch a log file update in real time, filtering for errors
+tail -f train.log | grep --line-buffered "ERROR"
+
+# Sort experiments by final accuracy
+grep "final_accuracy" results/*.log | sort -t= -k2 -n -r
+
+# Redirect stdout and stderr to separate files
+python train.py > output.log 2> errors.log
+
+# Redirect both to the same file
+python train.py > train_full.log 2>&1
+```
+
+The three redirects you need:
+
+| Symbol | What it does |
+|--------|-------------|
+| `>` | Write stdout to file (overwrite) |
+| `>>` | Append stdout to file |
+| `2>` | Write stderr to file |
+| `2>&1` | Send stderr to same place as stdout |
+| `\|` | Send stdout of one command as stdin to the next |
+
+### Step 3: Background processes
+
+Training runs take hours. You don't want to keep your terminal open the whole time.
+
+```bash
+# Run in background (output still goes to terminal)
+python train.py &
+
+# Run in background, immune to hangup (closing terminal won't kill it)
+nohup python train.py > train.log 2>&1 &
+
+# Check what's running in background
+jobs
+ps aux | grep train.py
+
+# Bring a background job to foreground
+fg %1
+
+# Kill a background process
+kill %1
+# or find its PID and kill that
+kill $(pgrep -f "train.py")
+```
+
+The difference between `&`, `nohup`, and `screen`/`tmux`:
+
+| Method | Survives terminal close? | Can reattach? |
+|--------|-------------------------|---------------|
+| `command &` | No | No |
+| `nohup command &` | Yes | No (check log file) |
+| `screen` / `tmux` | Yes | Yes |
+
+For anything longer than a few minutes, use tmux.
+
+### Step 4: tmux
+
+tmux lets you create persistent terminal sessions with multiple panes. This is the single most useful tool for managing training runs.
+
+```bash
+# Install
+# macOS
+brew install tmux
+# Ubuntu
+sudo apt install tmux
+
+# Start a named session
+tmux new -s training
+
+# Split horizontally
+# Ctrl+B then "
+
+# Split vertically
+# Ctrl+B then %
+
+# Navigate between panes
+# Ctrl+B then arrow keys
+
+# Detach (session keeps running)
+# Ctrl+B then d
+
+# Reattach
+tmux attach -t training
+
+# List sessions
+tmux ls
+
+# Kill a session
+tmux kill-session -t training
+```
+
+A typical AI workflow session:
+
+```bash
+tmux new -s train
+
+# Pane 1: start training
+python train.py --epochs 100 --lr 1e-4
+
+# Ctrl+B, " to split, then run GPU monitor
+watch -n1 nvidia-smi
+
+# Ctrl+B, % to split vertically, tail the logs
+tail -f logs/experiment.log
+
+# Now detach with Ctrl+B, d
+# SSH out, go get coffee, come back
+# tmux attach -t train
+```
+
+### Step 5: Monitoring with htop and nvtop
+
+```bash
+# System processes (better than top)
+htop
+
+# GPU processes (if you have NVIDIA GPU)
+# Install: sudo apt install nvtop (Ubuntu) or brew install nvtop (macOS)
+nvtop
+
+# Quick GPU check without nvtop
+nvidia-smi
+
+# Watch GPU usage update every second
+watch -n1 nvidia-smi
+
+# See which processes are using the GPU
+nvidia-smi --query-compute-apps=pid,name,used_memory --format=csv
+```
+
+`htop` keybindings you'll use:
+- `F6` or `>` to sort by column (sort by memory to find memory leaks)
+- `F5` to toggle tree view (see child processes)
+- `F9` to kill a process
+- `/` to search for a process name
+
+### Step 6: SSH for remote GPU boxes
+
+When you rent a cloud GPU (Lambda, RunPod, Vast.ai), you connect via SSH.
+
+```bash
+# Basic connection
+ssh user@gpu-box-ip
+
+# With a specific key
+ssh -i ~/.ssh/my_gpu_key user@gpu-box-ip
+
+# Copy files to remote
+scp model.pt user@gpu-box-ip:~/models/
+
+# Copy files from remote
+scp user@gpu-box-ip:~/results/metrics.json ./
+
+# Sync a whole directory (faster for many files)
+rsync -avz ./data/ user@gpu-box-ip:~/data/
+
+# Port forward (access remote Jupyter/TensorBoard locally)
+ssh -L 8888:localhost:8888 user@gpu-box-ip
+# Now open localhost:8888 in your browser
+
+# SSH config for convenience
+# Add to ~/.ssh/config:
+# Host gpu
+#     HostName 192.168.1.100
+#     User ubuntu
+#     IdentityFile ~/.ssh/gpu_key
+#
+# Then just:
+# ssh gpu
+```
+
+### Step 7: Useful aliases for AI work
+
+Add these to your `~/.bashrc` or `~/.zshrc`:
+
+```bash
+source phases/00-setup-and-tooling/10-terminal-and-shell/code/shell_aliases.sh
+```
+
+Or copy the ones you want. The key aliases:
+
+```bash
+# GPU status at a glance
+alias gpu='nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader'
+
+# Kill all Python training processes
+alias killtraining='pkill -f "python.*train"'
+
+# Quick virtual environment activate
+alias ae='source .venv/bin/activate'
+
+# Watch training loss
+alias watchloss='tail -f logs/*.log | grep --line-buffered "loss"'
+```
+
+See `code/shell_aliases.sh` for the full set.
+
+### Step 8: Common AI terminal patterns
+
+These come up repeatedly in practice:
+
+```bash
+# Run training, log everything, notify when done
+python train.py 2>&1 | tee train.log; echo "DONE" | mail -s "Training complete" you@email.com
+
+# Compare two experiment logs side by side
+diff <(grep "accuracy" exp1.log) <(grep "accuracy" exp2.log)
+
+# Find the largest model files (clean up disk space)
+find . -name "*.pt" -o -name "*.safetensors" | xargs du -h | sort -rh | head -20
+
+# Download a model from Hugging Face
+wget https://huggingface.co/model/resolve/main/model.safetensors
+
+# Untar a dataset
+tar xzf dataset.tar.gz -C ./data/
+
+# Count lines in all Python files (see how big your project is)
+find . -name "*.py" | xargs wc -l | tail -1
+
+# Check disk space (training data fills disks fast)
+df -h
+du -sh ./data/*
+
+# Environment variable check before training
+env | grep -i cuda
+env | grep -i torch
+```
+
+## Use It
+
+Here's when each tool comes into play during this course:
+
+| Tool | When you use it |
+|------|----------------|
+| tmux | Every training run (Phases 3+) |
+| `tail -f` + `grep` | Monitoring training logs |
+| `nohup` / `&` | Quick background tasks |
+| `htop` / `nvtop` | Debugging slow training, OOM errors |
+| SSH + `rsync` | Working on cloud GPUs |
+| Piping + redirects | Processing experiment results |
+| Aliases | Saving time on repetitive commands |
+
+## Exercises
+
+1. Install tmux, create a session with three panes, and run `htop` in one, `watch -n1 date` in another, and a Python script in the third. Detach and reattach.
+2. Add the aliases from `code/shell_aliases.sh` to your shell config and reload with `source ~/.zshrc` (or `~/.bashrc`).
+3. Create a fake training log with `for i in $(seq 1 100); do echo "epoch $i loss: $(echo "scale=4; 1/$i" | bc)"; sleep 0.1; done > fake_train.log` and then use `grep`, `tail`, and `awk` to extract just the loss values.
+4. Set up an SSH config entry for a server you have access to (or use `localhost` to practice the syntax).
+
+## Key Terms
+
+| Term | What people say | What it actually means |
+|------|----------------|----------------------|
+| Shell | "The terminal" | The program that interprets your commands (bash, zsh, fish) |
+| tmux | "Terminal multiplexer" | A program that lets you run multiple terminal sessions inside one window, and detach/reattach |
+| Pipe | "The bar thing" | The `\|` operator that sends one command's output as input to another |
+| PID | "Process ID" | A unique number assigned to every running process, used to monitor or kill it |
+| nohup | "No hangup" | Runs a command immune to the hangup signal, so closing the terminal won't kill it |
+| SSH | "Connecting to the server" | Secure Shell, an encrypted protocol for running commands on a remote machine |
+
+
+================================================================================
+FILE: 00-setup-and-tooling\11-linux-for-ai\quiz.json
+================================================================================
+
+{
+  "questions": [
+    {
+      "stage": "pre",
+      "question": "What does the '~' symbol represent in a Linux file path?",
+      "options": ["The root directory of the file system", "The current user's home directory", "The temporary files directory", "The directory where system programs are installed"],
+      "correct": 1,
+      "explanation": "The tilde (~) is a shortcut for the current user's home directory, typically /home/username on Linux. 'cd ~' takes you home from anywhere."
+    },
+    {
+      "stage": "pre",
+      "question": "What is the purpose of 'sudo' before a command?",
+      "options": ["It speeds up the command execution", "It runs the command with root (administrator) privileges", "It runs the command in a sandboxed environment", "It logs the command output to a system file"],
+      "correct": 1,
+      "explanation": "sudo (superuser do) temporarily elevates your privileges to root level for a single command. Required for system-level operations like installing packages with apt."
+    },
+    {
+      "stage": "post",
+      "question": "You get 'Permission denied' when trying to run a shell script. What command fixes this?",
+      "options": ["sudo rm script.sh", "chmod +x script.sh", "chown root script.sh", "mv script.sh /usr/bin/"],
+      "correct": 1,
+      "explanation": "chmod +x adds execute permission to the file. Without the execute bit set, the shell refuses to run the script even if you own it."
+    },
+    {
+      "stage": "post",
+      "question": "On a remote GPU box, your training data fills the disk. Which command shows the largest directories consuming space?",
+      "options": ["ls -la /", "du -h --max-depth=1 / | sort -hr | head -20", "cat /proc/meminfo", "free -h"],
+      "correct": 1,
+      "explanation": "du -h shows disk usage per directory, --max-depth=1 limits to top-level directories, and sort -hr sorts by size in descending order. This reveals which directories are consuming the most space."
+    },
+    {
+      "stage": "post",
+      "question": "What is a key difference between the macOS and Linux versions of 'sed -i'?",
+      "options": ["Linux sed is faster than macOS sed", "macOS sed requires an empty string argument after -i ('sed -i \"\"'), while Linux does not", "Linux sed does not support regular expressions", "macOS sed cannot modify files in place"],
+      "correct": 1,
+      "explanation": "macOS uses BSD sed which requires 'sed -i \"\" pattern file', while Linux uses GNU sed which accepts 'sed -i pattern file'. This is a common gotcha when moving scripts between systems."
+    }
+  ]
+}
+
+
+================================================================================
+FILE: 00-setup-and-tooling\11-linux-for-ai\docs\en.md
+================================================================================
+
+# Linux for AI
+
+> Most AI runs on Linux. You need to know enough to not be stuck.
+
+**Type:** Learn
+**Languages:** --
+**Prerequisites:** Phase 0, Lesson 01
+**Time:** ~30 minutes
+
+## Learning Objectives
+
+- Navigate the Linux file system and perform essential file operations from the command line
+- Manage file permissions with `chmod` and `chown` to resolve "Permission denied" errors
+- Install system packages with `apt` and set up a fresh GPU box for AI work
+- Identify macOS-to-Linux differences that commonly trip up developers working on remote machines
+
+## The Problem
+
+You develop on macOS or Windows. But the moment you SSH into a cloud GPU box, rent a Lambda instance, or spin up an EC2 machine, you land in Ubuntu. The terminal is your only interface. There is no Finder, no Explorer, no GUI. If you can't navigate the file system, install packages, and manage processes from the command line, you're stuck paying for idle GPU hours while googling "how to unzip a file in Linux."
+
+This is a survival guide. It covers exactly what you need to operate on a remote Linux machine for AI work. Nothing more.
+
+## File System Layout
+
+Linux organizes everything under a single root `/`. There is no `C:\` or `/Volumes`. The directories you'll actually touch:
+
+```mermaid
+graph TD
+    root["/"] --> home["home/your-username/<br/>Your files — clone repos, run training"]
+    root --> tmp["tmp/<br/>Temporary files, cleared on reboot"]
+    root --> usr["usr/<br/>System programs and libraries"]
+    root --> etc["etc/<br/>Config files"]
+    root --> varlog["var/log/<br/>Logs — check when something breaks"]
+    root --> mnt["mnt/ or /media/<br/>External drives and volumes"]
+    root --> proc["proc/ and /sys/<br/>Virtual files — kernel and hardware info"]
+```
+
+Your home directory is `~` or `/home/your-username`. Almost everything you do happens here.
+
+## Essential Commands
+
+These are the 15 commands that cover 95% of what you'll do on a remote GPU box.
+
+### Moving Around
+
+```bash
+pwd                         # Where am I?
+ls                          # What's here?
+ls -la                      # What's here, including hidden files with details?
+cd /path/to/dir             # Go there
+cd ~                        # Go home
+cd ..                       # Go up one level
+```
+
+### Files and Directories
+
+```bash
+mkdir my-project            # Create a directory
+mkdir -p a/b/c              # Create nested directories in one shot
+
+cp file.txt backup.txt      # Copy a file
+cp -r src/ src-backup/      # Copy a directory (recursive)
+
+mv old.txt new.txt          # Rename a file
+mv file.txt /tmp/           # Move a file
+
+rm file.txt                 # Delete a file (no trash, it's gone)
+rm -rf my-dir/              # Delete a directory and everything inside
+```
+
+`rm -rf` is permanent. There is no undo. Double-check the path before hitting enter.
+
+### Reading Files
+
+```bash
+cat file.txt                # Print entire file
+head -20 file.txt           # First 20 lines
+tail -20 file.txt           # Last 20 lines
+tail -f log.txt             # Follow a log file in real time (Ctrl+C to stop)
+less file.txt               # Scroll through a file (q to quit)
+```
+
+### Searching
+
+```bash
+grep "error" training.log           # Find lines containing "error"
+grep -r "learning_rate" .           # Search all files in current directory
+grep -i "cuda" config.yaml          # Case-insensitive search
+
+find . -name "*.py"                 # Find all Python files under current dir
+find . -name "*.ckpt" -size +1G     # Find checkpoint files larger than 1GB
+```
+
+## Permissions
+
+Every file in Linux has an owner and permission bits. You'll run into this when scripts won't execute or you can't write to a directory.
+
+```bash
+ls -l train.py
+# -rwxr-xr-- 1 user group 2048 Mar 19 10:00 train.py
+#  ^^^             owner permissions: read, write, execute
+#     ^^^          group permissions: read, execute
+#        ^^        everyone else: read only
+```
+
+Common fixes:
+
+```bash
+chmod +x train.sh           # Make a script executable
+chmod 755 deploy.sh         # Owner: full, others: read+execute
+chmod 644 config.yaml       # Owner: read+write, others: read only
+
+chown user:group file.txt   # Change who owns a file (needs sudo)
+```
+
+When something says "Permission denied," it's almost always a permissions issue. `chmod +x` or `sudo` will fix most cases.
+
+## Package Management (apt)
+
+Ubuntu uses `apt`. This is how you install system-level software.
+
+```bash
+sudo apt update             # Refresh the package list (always do this first)
+sudo apt install -y htop    # Install a package (-y skips confirmation)
+sudo apt install -y build-essential  # C compiler, make, etc. Needed by many Python packages
+sudo apt install -y tmux    # Terminal multiplexer (keep sessions alive after disconnect)
+
+apt list --installed        # What's installed?
+sudo apt remove htop        # Uninstall
+```
+
+Common packages you'll install on a fresh GPU box:
+
+```bash
+sudo apt update && sudo apt install -y \
+    build-essential \
+    git \
+    curl \
+    wget \
+    tmux \
+    htop \
+    unzip \
+    python3-venv
+```
+
+## Users and sudo
+
+You're usually logged in as a regular user. Some operations need root (admin) access.
+
+```bash
+whoami                      # What user am I?
+sudo command                # Run a single command as root
+sudo su                     # Become root (exit to go back, use sparingly)
+```
+
+On cloud GPU instances, you're typically the only user and already have sudo access. Don't run everything as root. Use sudo only when needed.
+
+## Processes and systemd
+
+When your training hangs, or you need to check what's running:
+
+```bash
+htop                        # Interactive process viewer (q to quit)
+ps aux | grep python        # Find running Python processes
+kill 12345                  # Gracefully stop process with PID 12345
+kill -9 12345               # Force kill (use when graceful doesn't work)
+nvidia-smi                  # GPU processes and memory usage
+```
+
+systemd manages services (background daemons). You'll use it if you run inference servers:
+
+```bash
+sudo systemctl start nginx          # Start a service
+sudo systemctl stop nginx           # Stop it
+sudo systemctl restart nginx        # Restart it
+sudo systemctl status nginx         # Check if it's running
+sudo systemctl enable nginx         # Start automatically on boot
+```
+
+## Disk Space
+
+GPU boxes often have limited disk space. Models and datasets fill it fast.
+
+```bash
+df -h                       # Disk usage for all mounted drives
+df -h /home                 # Disk usage for /home specifically
+
+du -sh *                    # Size of each item in current directory
+du -sh ~/.cache             # Size of your cache (pip, huggingface models land here)
+du -sh /data/checkpoints/   # Check how big your checkpoints are
+
+# Find the biggest space hogs
+du -h --max-depth=1 / 2>/dev/null | sort -hr | head -20
+```
+
+Common space savers:
+
+```bash
+# Clear pip cache
+pip cache purge
+
+# Clear apt cache
+sudo apt clean
+
+# Remove old checkpoints you don't need
+rm -rf checkpoints/epoch_01/ checkpoints/epoch_02/
+```
+
+## Networking
+
+You'll download models, transfer files, and hit APIs from the command line.
+
+```bash
+# Download files
+wget https://example.com/model.bin                   # Download a file
+curl -O https://example.com/data.tar.gz              # Same thing with curl
+curl -s https://api.example.com/health | python3 -m json.tool  # Hit an API, pretty-print JSON
+
+# Transfer files between machines
+scp model.bin user@remote:/data/                     # Copy file to remote machine
+scp user@remote:/data/results.csv .                  # Copy file from remote to local
+scp -r user@remote:/data/checkpoints/ ./local-dir/   # Copy directory
+
+# Sync directories (faster than scp for large transfers, resumes on failure)
+rsync -avz --progress ./data/ user@remote:/data/
+rsync -avz --progress user@remote:/results/ ./results/
+```
+
+Use `rsync` over `scp` for anything large. It only transfers changed bytes and handles interrupted connections.
+
+## tmux: Keep Sessions Alive
+
+When you SSH into a remote box, closing your laptop kills your training run. tmux prevents this.
+
+```bash
+tmux new -s train           # Start a new session named "train"
+# ... start your training, then:
+# Ctrl+B, then D            # Detach (training keeps running)
+
+tmux ls                     # List sessions
+tmux attach -t train        # Reattach to session
+
+# Inside tmux:
+# Ctrl+B, then %            # Split pane vertically
+# Ctrl+B, then "            # Split pane horizontally
+# Ctrl+B, then arrow keys   # Switch between panes
+```
+
+Always run long training jobs inside tmux. Always.
+
+## WSL2 for Windows Users
+
+If you're on Windows, WSL2 gives you a real Linux environment without dual-booting.
+
+```bash
+# In PowerShell (admin)
+wsl --install -d Ubuntu-24.04
+
+# After restart, open Ubuntu from Start menu
+sudo apt update && sudo apt upgrade -y
+```
+
+WSL2 runs a real Linux kernel. Everything in this lesson works inside it. Your Windows files are at `/mnt/c/Users/YourName/` from inside WSL.
+
+GPU passthrough works with NVIDIA drivers installed on the Windows side. Install the Windows NVIDIA driver (not the Linux one), and CUDA will be available inside WSL2.
+
+## Gotchas: macOS to Linux
+
+Things that will trip you up if you're coming from macOS:
+
+| macOS | Linux | Notes |
+|-------|-------|-------|
+| `brew install` | `sudo apt install` | Different package names sometimes. `brew install htop` vs `sudo apt install htop` works the same, but `brew install readline` vs `sudo apt install libreadline-dev` does not. |
+| `open file.txt` | `xdg-open file.txt` | But you won't have a GUI on a remote box. Use `cat` or `less`. |
+| `pbcopy` / `pbpaste` | Not available | Pipe to/from clipboard doesn't exist over SSH. |
+| `~/.zshrc` | `~/.bashrc` | macOS defaults to zsh. Most Linux servers use bash. |
+| `/opt/homebrew/` | `/usr/bin/`, `/usr/local/bin/` | Binaries live in different places. |
+| `sed -i '' 's/a/b/' file` | `sed -i 's/a/b/' file` | macOS sed needs an empty string after `-i`. Linux does not. |
+| Case-insensitive filesystem | Case-sensitive filesystem | `Model.py` and `model.py` are two different files on Linux. |
+| Line endings `\n` | Line endings `\n` | Same. But Windows uses `\r\n`, which breaks bash scripts. Run `dos2unix` to fix. |
+
+## Quick Reference Card
+
+```
+Navigation:     pwd, ls, cd, find
+Files:          cp, mv, rm, mkdir, cat, head, tail, less
+Search:         grep, find
+Permissions:    chmod, chown, sudo
+Packages:       apt update, apt install
+Processes:      htop, ps, kill, nvidia-smi
+Services:       systemctl start/stop/restart/status
+Disk:           df -h, du -sh
+Network:        curl, wget, scp, rsync
+Sessions:       tmux new/attach/detach
+```
+
+## Exercises
+
+1. SSH into any Linux machine (or open WSL2) and navigate to your home directory. Create a project folder, create three empty files inside it with `touch`, then list them with `ls -la`.
+2. Install `htop` with apt, run it, and identify which process is using the most memory.
+3. Start a tmux session, run `sleep 300` inside it, detach, list sessions, and reattach.
+4. Use `df -h` to check available disk space, then use `du -sh ~/.cache/*` to find what's taking up space in your cache.
+5. Transfer a file from your local machine to a remote one using `scp`, then do the same transfer with `rsync` and compare the experience.
+
+
+================================================================================
+FILE: 00-setup-and-tooling\12-debugging-and-profiling\quiz.json
+================================================================================
+
+{
+  "questions": [
+    {
+      "stage": "pre",
+      "question": "What makes debugging AI/ML code fundamentally different from debugging a typical web application?",
+      "options": ["AI code uses different programming languages", "AI bugs often don't crash -- they silently produce incorrect results with no error messages", "AI code cannot be debugged with standard tools like print statements", "AI code always requires a GPU to debug"],
+      "correct": 1,
+      "explanation": "The worst AI bugs produce valid-looking output. A misconfigured training loop might run for hours without errors while the model learns nothing useful, unlike web apps that crash with stack traces."
+    },
+    {
+      "stage": "pre",
+      "question": "What does a profiler measure?",
+      "options": ["Whether the code produces correct output", "How much time and memory each part of the code consumes", "How many bugs exist in the codebase", "The code coverage of unit tests"],
+      "correct": 1,
+      "explanation": "Profilers measure resource consumption -- execution time per function, memory allocation, and GPU utilization -- helping you find bottlenecks and optimize performance."
+    },
+    {
+      "stage": "post",
+      "question": "Your model achieves 99% accuracy on the test set. What AI-specific bug should you suspect first?",
+      "options": ["The model has too many parameters", "Data leakage -- test samples may have leaked into the training set", "The learning rate is too high", "The batch size is too large"],
+      "correct": 1,
+      "explanation": "Suspiciously high accuracy often indicates data leakage -- overlap between training and test data, or features that contain the target label. Always check for train/test overlap."
+    },
+    {
+      "stage": "post",
+      "question": "What is the most common finding when profiling a training loop's time breakdown?",
+      "options": ["The backward pass takes 90% of the time", "Data loading takes more time than the forward and backward passes combined", "Writing logs takes the most time", "GPU memory allocation is the bottleneck"],
+      "correct": 1,
+      "explanation": "Data loading often takes 60%+ of training time when num_workers=0 in the DataLoader. The fix is setting num_workers > 0 to load data in parallel with GPU computation."
+    },
+    {
+      "stage": "post",
+      "question": "You see NaN loss at step 500. Which approach will help you find the root cause?",
+      "options": ["Restart training from scratch with a different random seed", "Use detect_nan to check for NaN/Inf in gradients and add breakpoint() at the failure point", "Increase the batch size to stabilize gradients", "Switch from Adam to SGD optimizer"],
+      "correct": 1,
+      "explanation": "First identify WHERE the NaN originates by checking gradients for each parameter. A conditional breakpoint at the NaN step lets you inspect tensor values interactively. Common causes: learning rate too high, log(0), or division by zero."
+    }
+  ]
+}
+
+
+================================================================================
+FILE: 00-setup-and-tooling\12-debugging-and-profiling\code\debug_tools.py
+================================================================================
+
+import sys
+import time
+import tracemalloc
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+try:
+    import torch
+    import torch.nn as nn
+    HAS_TORCH = True
+except ImportError:
+    HAS_TORCH = False
+
+
+def debug_print(name, tensor):
+    print(f"  {name}: shape={tensor.shape}, dtype={tensor.dtype}, "
+          f"device={tensor.device}, "
+          f"min={tensor.min().item():.4f}, max={tensor.max().item():.4f}, "
+          f"mean={tensor.mean().item():.4f}, "
+          f"has_nan={tensor.isnan().any().item()}")
+
+
+class Timer:
+    def __init__(self, name=""):
+        self.name = name
+        self.elapsed = 0.0
+
+    def __enter__(self):
+        self.start = time.perf_counter()
+        return self
+
+    def __exit__(self, *args):
+        self.elapsed = time.perf_counter() - self.start
+        print(f"  [{self.name}] {self.elapsed:.4f}s")
+
+
+def check_shapes(model, sample_input):
+    print(f"  Input: {sample_input.shape}")
+    hooks = []
+
+    def make_hook(name):
+        def hook(module, inp, out):
+            in_shape = inp[0].shape if isinstance(inp, tuple) else inp.shape
+            out_shape = out.shape if hasattr(out, "shape") else type(out).__name__
+            print(f"    {name}: {in_shape} -> {out_shape}")
+        return hook
+
+    for name, module in model.named_modules():
+        if name:
+            hooks.append(module.register_forward_hook(make_hook(name)))
+
+    with torch.no_grad():
+        model(sample_input)
+
+    for h in hooks:
+        h.remove()
+
+
+def detect_nan(model, loss, step):
+    if torch.isnan(loss):
+        print(f"  NaN loss detected at step {step}")
+        for name, param in model.named_parameters():
+            if param.grad is not None:
+                if torch.isnan(param.grad).any():
+                    print(f"    NaN gradient in {name}")
+                if torch.isinf(param.grad).any():
+                    print(f"    Inf gradient in {name}")
+        return True
+    return False
+
+
+def check_devices(model, *tensors):
+    model_device = next(model.parameters()).device
+    print(f"  Model device: {model_device}")
+    for i, t in enumerate(tensors):
+        status = "OK" if t.device == model_device else "MISMATCH"
+        print(f"    Tensor {i}: {t.device} [{status}]")
+
+
+def check_gradient_health(model):
+    total_norm = 0.0
+    for name, param in model.named_parameters():
+        if param.grad is not None:
+            grad_norm = param.grad.data.norm(2).item()
+            total_norm += grad_norm ** 2
+            if grad_norm > 100:
+                print(f"    WARNING: large gradient in {name}: {grad_norm:.2f}")
+            if grad_norm == 0:
+                print(f"    WARNING: zero gradient in {name}")
+    total_norm = total_norm ** 0.5
+    print(f"  Total gradient norm: {total_norm:.4f}")
+    return total_norm
+
+
+def demo_print_debugging():
+    print("\n--- 1. Print Debugging for Tensors ---")
+    x = torch.randn(32, 784)
+    debug_print("input batch", x)
+
+    w = torch.randn(784, 128)
+    out = x @ w
+    debug_print("after matmul", out)
+
+    with_nan = out.clone()
+    with_nan[0, 0] = float("nan")
+    debug_print("with injected NaN", with_nan)
+
+
+def demo_timing():
+    print("\n--- 2. Timing Code Sections ---")
+
+    with Timer("matrix multiply 1000x1000"):
+        a = torch.randn(1000, 1000)
+        b = torch.randn(1000, 1000)
+        _ = a @ b
+
+    with Timer("matrix multiply 5000x5000"):
+        a = torch.randn(5000, 5000)
+        b = torch.randn(5000, 5000)
+        _ = a @ b
+
+
+def demo_memory_tracking():
+    print("\n--- 3. Memory Tracking (tracemalloc) ---")
+    tracemalloc.start()
+
+    data = [torch.randn(100, 100) for _ in range(100)]
+    more_data = torch.randn(1000, 1000)
+
+    snapshot = tracemalloc.take_snapshot()
+    top_stats = snapshot.statistics("lineno")
+    print("  Top 5 memory allocations:")
+    for stat in top_stats[:5]:
+        print(f"    {stat}")
+
+    del data, more_data
+    tracemalloc.stop()
+
+
+def demo_shape_checking():
+    print("\n--- 4. Shape Checking Through Model ---")
+
+    model = nn.Sequential(
+        nn.Linear(784, 256),
+        nn.ReLU(),
+        nn.Linear(256, 64),
+        nn.ReLU(),
+        nn.Linear(64, 10),
+    )
+
+    sample = torch.randn(4, 784)
+    check_shapes(model, sample)
+
+
+def demo_nan_detection():
+    print("\n--- 5. NaN Detection ---")
+
+    model = nn.Sequential(
+        nn.Linear(784, 256),
+        nn.ReLU(),
+        nn.Linear(256, 10),
+    )
+
+    x = torch.randn(4, 784)
+    target = torch.randint(0, 10, (4,))
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+    optimizer.zero_grad()
+    output = model(x)
+    loss = criterion(output, target)
+    loss.backward()
+    print(f"  Normal loss: {loss.item():.4f}")
+    nan_found = detect_nan(model, loss, step=0)
+    print(f"  NaN detected: {nan_found}")
+
+    fake_nan_loss = torch.tensor(float("nan"))
+    print(f"  Simulated NaN loss: {fake_nan_loss.item()}")
+    nan_found = detect_nan(model, fake_nan_loss, step=99)
+    print(f"  NaN detected: {nan_found}")
+
+
+def demo_device_checking():
+    print("\n--- 6. Device Checking ---")
+
+    model = nn.Linear(10, 5)
+    t1 = torch.randn(4, 10)
+    t2 = torch.randn(4, 10)
+
+    check_devices(model, t1, t2)
+
+    if torch.cuda.is_available():
+        model_gpu = model.cuda()
+        t_cpu = torch.randn(4, 10)
+        t_gpu = torch.randn(4, 10).cuda()
+        print("  With mixed devices:")
+        check_devices(model_gpu, t_cpu, t_gpu)
+
+
+def demo_gradient_health():
+    print("\n--- 7. Gradient Health Check ---")
+
+    model = nn.Sequential(
+        nn.Linear(784, 256),
+        nn.ReLU(),
+        nn.Linear(256, 10),
+    )
+
+    x = torch.randn(4, 784)
+    target = torch.randint(0, 10, (4,))
+    criterion = nn.CrossEntropyLoss()
+
+    output = model(x)
+    loss = criterion(output, target)
+    loss.backward()
+    check_gradient_health(model)
+
+
+def demo_gpu_memory():
+    print("\n--- 8. GPU Memory Summary ---")
+
+    if not torch.cuda.is_available():
+        print("  No GPU available. Skipping GPU memory demo.")
+        print("  On a GPU machine, torch.cuda.memory_summary() shows:")
+        print("    - Allocated memory per block size")
+        print("    - Cached (reserved) memory")
+        print("    - Peak memory usage")
+        return
+
+    print(f"  GPU: {torch.cuda.get_device_name(0)}")
+    print(f"  Allocated: {torch.cuda.memory_allocated() / 1e6:.1f} MB")
+    print(f"  Cached: {torch.cuda.memory_reserved() / 1e6:.1f} MB")
+
+    large_tensor = torch.randn(10000, 10000, device="cuda")
+    print(f"  After 10k x 10k tensor:")
+    print(f"    Allocated: {torch.cuda.memory_allocated() / 1e6:.1f} MB")
+
+    del large_tensor
+    torch.cuda.empty_cache()
+    print(f"  After cleanup:")
+    print(f"    Allocated: {torch.cuda.memory_allocated() / 1e6:.1f} MB")
+
+
+def demo_logging():
+    print("\n--- 9. Structured Logging ---")
+
+    logger.info("Training started: lr=0.001, batch_size=32, epochs=10")
+    logger.info("Step 100: loss=2.3026, accuracy=0.10")
+    logger.warning("Loss spike detected: 15.7 at step 450")
+    logger.info("Step 1000: loss=0.4512, accuracy=0.87")
+    logger.info("Training complete: best_loss=0.3201")
+
+
+def demo_conditional_breakpoint():
+    print("\n--- 10. Conditional Breakpoint Pattern ---")
+    print("  In real code, use this pattern:")
+    print()
+    print("    for step in range(num_steps):")
+    print("        loss = train_step(model, batch)")
+    print("        if loss.item() > 10 or torch.isnan(loss):")
+    print("            breakpoint()  # drops into pdb")
+    print()
+    print("  Useful pdb commands once inside:")
+    print("    p tensor.shape       # print shape")
+    print("    p tensor.device      # check device")
+    print("    p tensor.grad        # inspect gradients")
+    print("    p tensor.isnan().sum()  # count NaNs")
+    print("    c                    # continue execution")
+    print("    q                    # quit debugger")
+
+
+def main():
+    print("=" * 60)
+    print("  AI Debugging and Profiling Toolkit")
+    print("  Phase 0, Lesson 12")
+    print("=" * 60)
+
+    if not HAS_TORCH:
+        print("\nPyTorch not installed. Install with:")
+        print("  uv pip install torch")
+        print("\nRunning non-PyTorch demos only...\n")
+        demo_memory_tracking()
+        demo_logging()
+        return 1
+
+    demo_print_debugging()
+    demo_timing()
+    demo_memory_tracking()
+    demo_shape_checking()
+    demo_nan_detection()
+    demo_device_checking()
+    demo_gradient_health()
+    demo_gpu_memory()
+    demo_logging()
+    demo_conditional_breakpoint()
+
+    print("\n" + "=" * 60)
+    print("  All demos complete.")
+    print("  Next: introduce bugs intentionally and practice catching them.")
+    print("=" * 60 + "\n")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+
+
+================================================================================
+FILE: 00-setup-and-tooling\12-debugging-and-profiling\docs\en.md
+================================================================================
+
+# Debugging and Profiling
+
+> The worst AI bugs don't crash. They train silently on garbage and report a beautiful loss curve.
+
+**Type:** Build
+**Language:** Python
+**Prerequisites:** Lesson 1 (Dev Environment), basic PyTorch familiarity
+**Time:** ~60 minutes
+
+## Learning Objectives
+
+- Use conditional `breakpoint()` and `debug_print` to inspect tensor shapes, dtypes, and NaN values mid-training
+- Profile training loops with `cProfile`, `line_profiler`, and `tracemalloc` to find bottlenecks
+- Detect common AI bugs: shape mismatches, NaN loss, data leakage, and wrong-device tensors
+- Set up TensorBoard to visualize loss curves, weight histograms, and gradient distributions
+
+## The Problem
+
+AI code fails differently than regular code. A web app crashes with a stack trace. A misconfigured training loop runs for 8 hours, burns $200 in GPU time, and produces a model that predicts the mean of every input. The code never errored. The bug was a tensor on the wrong device, a forgotten `.detach()`, or labels leaking into features.
+
+You need debugging tools that catch these silent failures before they waste your time and compute.
+
+## The Concept
+
+AI debugging operates at three levels:
+
+```mermaid
+graph TD
+    L3["3. Training Dynamics<br/>Loss curves, gradient norms, activations"] --> L2
+    L2["2. Tensor Operations<br/>Shapes, dtypes, devices, NaN/Inf values"] --> L1
+    L1["1. Standard Python<br/>Breakpoints, logging, profiling, memory"]
+```
+
+Most people jump straight to level 3 (staring at TensorBoard). But 80% of AI bugs live at levels 1 and 2.
+
+## Build It
+
+### Part 1: Print Debugging (Yes, It Works)
+
+Print debugging gets dismissed. It shouldn't. For tensor code, a targeted print statement beats stepping through a debugger because you need to see shapes, dtypes, and value ranges all at once.
+
+```python
+def debug_print(name, tensor):
+    print(f"{name}: shape={tensor.shape}, dtype={tensor.dtype}, "
+          f"device={tensor.device}, "
+          f"min={tensor.min().item():.4f}, max={tensor.max().item():.4f}, "
+          f"mean={tensor.mean().item():.4f}, "
+          f"has_nan={tensor.isnan().any().item()}")
+```
+
+Call this after every suspicious operation. When the bug is found, remove the prints. Simple.
+
+### Part 2: Python Debugger (pdb and breakpoint)
+
+The built-in debugger is underrated for AI work. Drop `breakpoint()` into your training loop and inspect tensors interactively.
+
+```python
+def training_step(model, batch, criterion, optimizer):
+    inputs, labels = batch
+    outputs = model(inputs)
+    loss = criterion(outputs, labels)
+
+    if loss.item() > 100 or torch.isnan(loss):
+        breakpoint()
+
+    loss.backward()
+    optimizer.step()
+```
+
+When the debugger drops you in, useful commands:
+
+- `p outputs.shape` to check shapes
+- `p loss.item()` to see the loss value
+- `p torch.isnan(outputs).sum()` to count NaNs
+- `p model.fc1.weight.grad` to check gradients
+- `c` to continue, `q` to quit
+
+This is conditional debugging. You only stop when something looks wrong. For a 10,000-step training run, that matters.
+
+### Part 3: Python Logging
+
+Replace print statements with logging when your debugging goes beyond a quick check.
+
+```python
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler("training.log"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+logger.info("Starting training: lr=%.4f, batch_size=%d", lr, batch_size)
+logger.warning("Loss spike detected: %.4f at step %d", loss.item(), step)
+logger.error("NaN loss at step %d, stopping", step)
+```
+
+Logging gives you timestamps, severity levels, and file output. When a training run fails at 3 AM, you want a log file, not terminal output that scrolled off screen.
+
+### Part 4: Timing Code Sections
+
+Knowing where time goes is the first step to optimization.
+
+```python
+import time
+
+class Timer:
+    def __init__(self, name=""):
+        self.name = name
+
+    def __enter__(self):
+        self.start = time.perf_counter()
+        return self
+
+    def __exit__(self, *args):
+        elapsed = time.perf_counter() - self.start
+        print(f"[{self.name}] {elapsed:.4f}s")
+
+with Timer("data loading"):
+    batch = next(dataloader_iter)
+
+with Timer("forward pass"):
+    outputs = model(batch)
+
+with Timer("backward pass"):
+    loss.backward()
+```
+
+Common finding: data loading takes 60% of training time. The fix is `num_workers > 0` in your DataLoader, not a faster GPU.
+
+### Part 5: cProfile and line_profiler
+
+When you need more than manual timers:
+
+```bash
+python -m cProfile -s cumtime train.py
+```
+
+This shows every function call sorted by cumulative time. For line-by-line profiling:
+
+```bash
+pip install line_profiler
+```
+
+```python
+@profile
+def train_step(model, data, target):
+    output = model(data)
+    loss = F.cross_entropy(output, target)
+    loss.backward()
+    return loss
+
+# Run with: kernprof -l -v train.py
+```
+
+### Part 6: Memory Profiling
+
+#### CPU Memory with tracemalloc
+
+```python
+import tracemalloc
+
+tracemalloc.start()
+
+# your code here
+model = build_model()
+data = load_dataset()
+
+snapshot = tracemalloc.take_snapshot()
+top_stats = snapshot.statistics("lineno")
+for stat in top_stats[:10]:
+    print(stat)
+```
+
+#### CPU Memory with memory_profiler
+
+```bash
+pip install memory_profiler
+```
+
+```python
+from memory_profiler import profile
+
+@profile
+def load_data():
+    raw = read_csv("data.csv")       # watch memory jump here
+    processed = preprocess(raw)       # and here
+    return processed
+```
+
+Run with `python -m memory_profiler your_script.py` to see line-by-line memory usage.
+
+#### GPU Memory with PyTorch
+
+```python
+import torch
+
+if torch.cuda.is_available():
+    print(torch.cuda.memory_summary())
+
+    print(f"Allocated: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
+    print(f"Cached: {torch.cuda.memory_reserved() / 1e9:.2f} GB")
+```
+
+When you hit OOM (Out of Memory):
+
+1. Reduce batch size (first thing to try, always)
+2. Use `torch.cuda.empty_cache()` to free cached memory
+3. Use `del tensor` followed by `torch.cuda.empty_cache()` for large intermediates
+4. Use mixed precision (`torch.cuda.amp`) to halve memory usage
+5. Use gradient checkpointing for very deep models
+
+### Part 7: Common AI Bugs and How to Catch Them
+
+#### Shape Mismatch
+
+The most frequent bug. A tensor has shape `[batch, features]` when the model expects `[batch, channels, height, width]`.
+
+```python
+def check_shapes(model, sample_input):
+    print(f"Input: {sample_input.shape}")
+    hooks = []
+
+    def make_hook(name):
+        def hook(module, inp, out):
+            in_shape = inp[0].shape if isinstance(inp, tuple) else inp.shape
+            out_shape = out.shape if hasattr(out, "shape") else type(out)
+            print(f"  {name}: {in_shape} -> {out_shape}")
+        return hook
+
+    for name, module in model.named_modules():
+        hooks.append(module.register_forward_hook(make_hook(name)))
+
+    with torch.no_grad():
+        model(sample_input)
+
+    for h in hooks:
+        h.remove()
+```
+
+Run this once with a sample batch. It maps every shape transformation in your model.
+
+#### NaN Loss
+
+NaN loss means something exploded. Common causes:
+
+- Learning rate too high
+- Division by zero in custom loss
+- Log of zero or negative number
+- Exploding gradients in RNNs
+
+```python
+def detect_nan(model, loss, step):
+    if torch.isnan(loss):
+        print(f"NaN loss at step {step}")
+        for name, param in model.named_parameters():
+            if param.grad is not None:
+                if torch.isnan(param.grad).any():
+                    print(f"  NaN gradient in {name}")
+                if torch.isinf(param.grad).any():
+                    print(f"  Inf gradient in {name}")
+        return True
+    return False
+```
+
+#### Data Leakage
+
+Your model gets 99% accuracy on the test set. Sounds great. It's a bug.
+
+```python
+def check_data_leakage(train_set, test_set, id_column="id"):
+    train_ids = set(train_set[id_column].tolist())
+    test_ids = set(test_set[id_column].tolist())
+    overlap = train_ids & test_ids
+    if overlap:
+        print(f"DATA LEAKAGE: {len(overlap)} samples in both train and test")
+        return True
+    return False
+```
+
+Also check for temporal leakage: using future data to predict the past. Sort by timestamp before splitting.
+
+#### Wrong Device
+
+Tensors on different devices (CPU vs GPU) cause runtime errors. But sometimes a tensor silently stays on CPU while everything else is on GPU, and training just runs slowly.
+
+```python
+def check_devices(model, *tensors):
+    model_device = next(model.parameters()).device
+    print(f"Model device: {model_device}")
+    for i, t in enumerate(tensors):
+        if t.device != model_device:
+            print(f"  WARNING: tensor {i} on {t.device}, model on {model_device}")
+```
+
+### Part 8: TensorBoard Basics
+
+TensorBoard shows you what's happening inside training over time.
+
+```bash
+pip install tensorboard
+```
+
+```python
+from torch.utils.tensorboard import SummaryWriter
+
+writer = SummaryWriter("runs/experiment_1")
+
+for step in range(num_steps):
+    loss = train_step(model, batch)
+
+    writer.add_scalar("loss/train", loss.item(), step)
+    writer.add_scalar("lr", optimizer.param_groups[0]["lr"], step)
+
+    if step % 100 == 0:
+        for name, param in model.named_parameters():
+            writer.add_histogram(f"weights/{name}", param, step)
+            if param.grad is not None:
+                writer.add_histogram(f"grads/{name}", param.grad, step)
+
+writer.close()
+```
+
+Launch it:
+
+```bash
+tensorboard --logdir=runs
+```
+
+What to look for:
+
+- **Loss not decreasing**: Learning rate too low, or model architecture issue
+- **Loss oscillating wildly**: Learning rate too high
+- **Loss goes to NaN**: Numerical instability (see NaN section above)
+- **Train loss decreasing, val loss increasing**: Overfitting
+- **Weight histograms collapsing to zero**: Vanishing gradients
+- **Gradient histograms exploding**: Need gradient clipping
+
+### Part 9: VS Code Debugger
+
+For interactive debugging, configure VS Code with a `launch.json`:
+
+```json
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Training",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        }
+    ]
+}
+```
+
+Set breakpoints by clicking the gutter. Use the Variables pane to inspect tensor properties. The Debug Console lets you run arbitrary Python expressions mid-execution.
+
+Useful for stepping through data preprocessing pipelines where you want to see each transformation.
+
+## Use It
+
+Here's the debugging workflow that catches most AI bugs:
+
+1. **Before training**: Run `check_shapes` with a sample batch. Verify input and output dimensions match expectations.
+2. **First 10 steps**: Use `debug_print` on loss, outputs, and gradients. Confirm nothing is NaN and values are in reasonable ranges.
+3. **During training**: Log loss, learning rate, and gradient norms. Use TensorBoard for visualization.
+4. **When something breaks**: Drop `breakpoint()` at the failure point. Inspect tensors interactively.
+5. **For performance**: Time your data loading vs forward vs backward pass. Profile memory if you're near OOM.
+
+## Ship It
+
+Run the debugging toolkit script:
+
+```bash
+python phases/00-setup-and-tooling/12-debugging-and-profiling/code/debug_tools.py
+```
+
+See `outputs/prompt-debug-ai-code.md` for a prompt that helps diagnose AI-specific bugs.
+
+## Exercises
+
+1. Run `debug_tools.py` and read through each section's output. Modify the dummy model to introduce a NaN (hint: divide by zero in the forward pass) and watch the detector catch it.
+2. Profile a training loop with `cProfile` and identify the slowest function.
+3. Use `tracemalloc` to find which line in your data loading pipeline allocates the most memory.
+4. Set up TensorBoard for a simple training run and identify whether the model is overfitting.
+5. Use `breakpoint()` inside a training loop. Practice inspecting tensor shapes, devices, and gradient values from the debugger prompt.
+
+
+================================================================================
+FILE: 00-setup-and-tooling\12-debugging-and-profiling\outputs\prompt-debug-ai-code.md
+================================================================================
+
+---
+name: prompt-debug-ai-code
+description: Diagnose AI-specific bugs including NaN loss, shape errors, training failures, and OOM
+phase: 0
+lesson: 12
+---
+
+You are an AI/ML debugging specialist. The user is training or running a machine learning model and has hit a bug. Your job is to diagnose the root cause and provide the exact fix.
+
+When the user describes a problem, follow this process:
+
+1. Classify the bug into one of these categories:
+   - **NaN/Inf loss**: numerical instability during training
+   - **Shape mismatch**: tensor dimension errors
+   - **Training not converging**: loss not decreasing or stuck
+   - **OOM (Out of Memory)**: GPU or CPU memory exhaustion
+   - **Data issue**: leakage, wrong preprocessing, corrupted inputs
+   - **Device mismatch**: tensors on different devices
+   - **Silent failure**: code runs but model learns nothing
+
+2. Ask for the specific diagnostic output based on the category:
+
+   For **NaN loss**, ask the user to run:
+   ```python
+   for name, param in model.named_parameters():
+       if param.grad is not None:
+           print(f"{name}: grad_norm={param.grad.norm():.4f}, "
+                 f"has_nan={param.grad.isnan().any()}, "
+                 f"has_inf={param.grad.isinf().any()}")
+   ```
+
+   For **shape mismatch**, ask for:
+   ```python
+   print(f"Input shape: {x.shape}")
+   print(f"Expected: {model.fc1.in_features}")
+   print(f"Output shape: {model(x).shape}")
+   print(f"Target shape: {target.shape}")
+   ```
+
+   For **training not converging**, ask for:
+   - Learning rate value
+   - Loss values at steps 0, 10, 100, 1000
+   - Whether data is shuffled
+   - Whether gradients are being zeroed each step
+
+   For **OOM**, ask for:
+   ```python
+   print(f"Batch size: {batch_size}")
+   print(f"Model params: {sum(p.numel() for p in model.parameters()):,}")
+   print(f"GPU memory: {torch.cuda.memory_allocated()/1e9:.2f} GB / "
+         f"{torch.cuda.get_device_properties(0).total_memory/1e9:.2f} GB")
+   ```
+
+3. Provide the fix. Be specific. Not "try reducing the learning rate" but "change lr from 0.1 to 0.001" or "add torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) before optimizer.step()".
+
+Common root causes and their fixes:
+
+- **NaN after a few steps**: Learning rate too high. Reduce by 10x. Add gradient clipping.
+- **NaN immediately**: Log of zero or negative number in loss. Add epsilon: `torch.log(x + 1e-8)`.
+- **NaN in specific layer**: Check for division by zero. BatchNorm with batch_size=1 will NaN.
+- **Loss stuck at ln(num_classes)**: Model predicting uniform distribution. Check that gradients flow (no accidental `.detach()` or `with torch.no_grad()` around the forward pass).
+- **Loss stuck at high value**: Wrong loss function for the task. CrossEntropyLoss expects raw logits, not softmax output.
+- **Loss decreasing then exploding**: Learning rate too high for later training. Use a learning rate scheduler.
+- **Perfect training accuracy, bad test accuracy**: Overfitting. Add dropout, reduce model size, add data augmentation, or get more data.
+- **99% test accuracy on first epoch**: Data leakage. Labels are in the features, or train/test sets overlap.
+- **OOM during forward pass**: Batch size too large or model too big. Halve the batch size. Use mixed precision with `torch.cuda.amp.autocast()`.
+- **OOM during backward pass**: Gradient accumulation without clearing. Call `optimizer.zero_grad()` each step.
+- **RuntimeError about device**: Move all tensors to the same device. Use `model.to(device)` and `tensor.to(device)` consistently.
+- **Slow training, GPU utilization low**: Data loading is the bottleneck. Set `num_workers=4` (or higher) in DataLoader. Use `pin_memory=True`.
+
+Always end with a verification step the user can run to confirm the fix worked.
+
